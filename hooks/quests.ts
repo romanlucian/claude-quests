@@ -19,26 +19,50 @@ export type Watch =
   | { kind: 'skill' } // a skill runs
   | { kind: 'compact' } // the conversation is compacted
   | { kind: 'file'; path: string } // a file exists in the project
-  | { kind: 'settings'; key: 'hooks' | 'allow' } // your settings have hooks / allow rules
+  | { kind: 'settings'; key: 'hooks' | 'allow' | 'statusLine' } // your settings have hooks / allow rules / a status line
+  | { kind: 'command'; names: readonly string[] } // you run one of these slash commands
 
 export type Question = { ask: string; options: readonly string[]; answer: number }
 
 export type Quest = {
   id: string
-  level: 1 | 2 | 3
+  level: QuestLevel
   title: string
   /** Why it matters, in a sentence. */
   why: string
   /** What to do. */
   how: string
   docs: string
-  watch?: Watch
+  watch?: Watch | readonly Watch[]
   /** Answering these right completes the quest too. */
   quiz?: readonly Question[]
 }
 
-export const LEVEL_NAMES = { 1: 'First steps', 2: 'Getting faster', 3: 'Pro moves' } as const
-export const QUEST_XP = { 1: 10, 2: 20, 3: 30 } as const
+export type QuestLevel = 1 | 2 | 3 | 4 | 5 | 6
+
+export const LEVEL_NAMES = {
+  1: 'First steps',
+  2: 'Getting faster',
+  3: 'Pro moves',
+  4: 'Power user',
+  5: 'Expert',
+  6: 'Master',
+} as const
+export const QUEST_XP = { 1: 10, 2: 20, 3: 30, 4: 40, 5: 50, 6: 60 } as const
+
+/**
+ * Tracks: where you start, which docs pages your daily quest comes from and
+ * how hard its questions are. Everything stays open whatever you pick.
+ */
+export type Track = 'beginner' | 'advanced' | 'pro'
+
+export const TRACKS: Record<Track, { name: string; about: string; levels: readonly QuestLevel[]; dailyXp: number; options: number; questions: number }> = {
+  beginner: { name: 'Beginner', about: 'New to Claude Code: the basics, one step at a time.', levels: [1, 2], dailyXp: 25, options: 3, questions: 3 },
+  advanced: { name: 'Advanced', about: 'You use it every day: settings, subagents, skills, MCP, sessions.', levels: [3, 4], dailyXp: 35, options: 3, questions: 3 },
+  pro: { name: 'Pro', about: 'Expert: real scenarios, limits and edge cases, automation and parallel work.', levels: [5, 6], dailyXp: 50, options: 4, questions: 4 },
+}
+
+export const isTrack = (value: unknown): value is Track => value === 'beginner' || value === 'advanced' || value === 'pro'
 /** XP for trying a feature from the New tab. */
 export const NEW_XP = 15
 /** XP for the daily docs quest. */
@@ -217,18 +241,202 @@ export const QUESTS: readonly Quest[] = [
       },
     ],
   },
+  {
+    id: 'context-view',
+    level: 4,
+    title: 'See what fills the context',
+    why: 'The context window holds everything Claude knows in this conversation; seeing it shows what to trim.',
+    how: 'Run /context: a colored grid of what is in the context window, with suggestions.',
+    docs: `${DOCS}/context-window`,
+    watch: { kind: 'command', names: ['context'] },
+  },
+  {
+    id: 'model',
+    level: 4,
+    title: 'Pick the right model',
+    why: 'Bigger models think deeper; smaller ones are faster and cheaper. /model also sets the effort level.',
+    how: 'Run /model, look at the choices, and use the left/right arrows for effort.',
+    docs: `${DOCS}/model-config`,
+    watch: { kind: 'command', names: ['model'] },
+  },
+  {
+    id: 'resume',
+    level: 4,
+    title: 'Pick up where you left off',
+    why: 'Conversations are saved, so you can come back to one tomorrow.',
+    how: 'Run /resume to open the session picker, or start with claude --continue for the latest one.',
+    docs: `${DOCS}/sessions`,
+    watch: { kind: 'command', names: ['resume', 'continue'] },
+    quiz: [
+      {
+        ask: 'Which command continues the most recent conversation in this folder?',
+        options: ['claude --continue', 'claude --worktree', 'claude -p'],
+        answer: 0,
+      },
+    ],
+  },
+  {
+    id: 'branch',
+    level: 4,
+    title: 'Try another direction with /branch',
+    why: 'A branch copies the conversation at this point, so you can explore without losing it.',
+    how: 'Run /branch, try a different approach; the original conversation stays as it was.',
+    docs: `${DOCS}/sessions`,
+    watch: { kind: 'command', names: ['branch'] },
+  },
+  {
+    id: 'usage',
+    level: 4,
+    title: 'Know what it costs',
+    why: '/usage shows the session cost, your plan limits and activity.',
+    how: 'Run /usage (or its alias /cost).',
+    docs: `${DOCS}/costs`,
+    watch: { kind: 'command', names: ['usage', 'cost'] },
+  },
+  {
+    id: 'own-agent',
+    level: 5,
+    title: 'Write your own subagent',
+    why: 'A custom subagent is a specialist with its own instructions and tools, reused in every session.',
+    how: 'Ask Claude: "Create a subagent in .claude/agents that reviews my changes for accessibility."',
+    docs: `${DOCS}/sub-agents`,
+    watch: { kind: 'file', path: '.claude/agents' },
+  },
+  {
+    id: 'own-skill',
+    level: 5,
+    title: 'Write your own skill',
+    why: 'A skill packages a workflow you repeat, so you or Claude can run it as /name.',
+    how: 'Ask Claude: "Make a skill in .claude/skills for how we write release notes."',
+    docs: `${DOCS}/skills`,
+    watch: { kind: 'file', path: '.claude/skills' },
+  },
+  {
+    id: 'project-mcp',
+    level: 5,
+    title: 'Share an MCP server with your team',
+    why: 'A server added at project scope goes in .mcp.json, so everyone on the project gets it.',
+    how: 'Ask Claude to add an MCP server with project scope, then commit .mcp.json.',
+    docs: `${DOCS}/mcp`,
+    watch: { kind: 'file', path: '.mcp.json' },
+  },
+  {
+    id: 'statusline',
+    level: 5,
+    title: 'Make your own status line',
+    why: 'A status line keeps what you care about (model, branch, cost) under the prompt.',
+    how: 'Run /statusline and describe what you want to see.',
+    docs: `${DOCS}/statusline`,
+    watch: [
+      { kind: 'command', names: ['statusline'] },
+      { kind: 'settings', key: 'statusLine' },
+    ],
+  },
+  {
+    id: 'plugin',
+    level: 5,
+    title: 'Install a plugin',
+    why: 'Plugins bundle skills, agents, hooks and MCP servers you add in one step.',
+    how: 'Run /plugin and browse a marketplace.',
+    docs: `${DOCS}/plugins/install`,
+    watch: { kind: 'command', names: ['plugin'] },
+  },
+  {
+    id: 'worktree',
+    level: 6,
+    title: 'Work in parallel with worktrees',
+    why: 'Each session in its own worktree edits its own copy of the files, so parallel work never collides.',
+    how: 'Start with claude --worktree feature-x, or ask Claude to "work in a worktree".',
+    docs: `${DOCS}/worktrees`,
+    watch: { kind: 'tool', tools: ['EnterWorktree'] },
+    quiz: [
+      {
+        ask: 'What does claude --worktree feature-auth do?',
+        options: [
+          'Creates an isolated worktree under .claude/worktrees/ on a new branch and starts Claude there',
+          'Deletes the feature-auth branch',
+          'Opens a second window on the same files',
+        ],
+        answer: 0,
+      },
+      {
+        ask: 'What do worktrees need?',
+        options: ['A git repository', 'A cloud session', 'Plan mode'],
+        answer: 0,
+      },
+    ],
+  },
+  {
+    id: 'background',
+    level: 6,
+    title: 'Send work to the background',
+    why: 'A background session keeps working while you do something else.',
+    how: 'Run /background (or /bg); see your sessions with claude agents.',
+    docs: `${DOCS}/agent-view`,
+    watch: { kind: 'command', names: ['background', 'bg', 'tasks', 'bashes'] },
+  },
+  {
+    id: 'headless',
+    level: 6,
+    title: 'Run Claude from a script',
+    why: 'claude -p runs one prompt without the interactive screen: for scripts, CI and pipes.',
+    how: 'In a terminal: claude -p "Summarize this project" --output-format json',
+    docs: `${DOCS}/headless`,
+    quiz: [
+      {
+        ask: 'Which flag runs Claude Code non-interactively?',
+        options: ['-p (or --print)', '--worktree', '--continue'],
+        answer: 0,
+      },
+      {
+        ask: 'How do you get the answer as JSON, for a script?',
+        options: ['--output-format json', '/export', '--verbose'],
+        answer: 0,
+      },
+    ],
+  },
+  {
+    id: 'security',
+    level: 6,
+    title: 'Review your branch for security issues',
+    why: '/security-review checks the changes on your branch for vulnerabilities.',
+    how: 'On a branch with changes, run /security-review.',
+    docs: `${DOCS}/commands`,
+    watch: { kind: 'command', names: ['security-review'] },
+  },
+  {
+    id: 'automate',
+    level: 6,
+    title: 'Let Claude repeat a task',
+    why: '/loop runs a prompt again and again while the session is open; /schedule makes routines that run in the cloud.',
+    how: 'Try: /loop 10m check the build and tell me if it fails.',
+    docs: `${DOCS}/scheduled-tasks`,
+    watch: { kind: 'command', names: ['loop', 'schedule'] },
+  },
 ]
 
 export type Badge = { id: string; name: string; why: string }
 
-export const BADGES: readonly Badge[] = [
-  { id: 'first-steps', name: 'First Steps', why: 'Every level 1 quest' },
-  { id: 'speedrunner', name: 'Speedrunner', why: 'Every level 2 quest' },
-  { id: 'pro', name: 'Pro', why: 'Every level 3 quest' },
-  { id: 'scholar', name: 'Scholar', why: 'Every quiz answered right' },
-  { id: 'early-adopter', name: 'Early Adopter', why: 'Tried 3 new features' },
-  { id: 'reader', name: 'Reader', why: '5 daily docs quests' },
-  { id: 'on-fire', name: 'On Fire', why: 'A 7-day streak' },
+const QUIZZED = 7 // quests with a quiz: checked by a test
+
+/** Badges, from a first day to half a year: each has a goal and a count. */
+export const BADGES: readonly (Badge & { goal: number; count: (p: Progress) => number })[] = [
+  { id: 'first-steps', name: 'First Steps', why: 'Every First steps quest', goal: 5, count: p => doneIn(p, 1) },
+  { id: 'speedrunner', name: 'Speedrunner', why: 'Every Getting faster quest', goal: 5, count: p => doneIn(p, 2) },
+  { id: 'pro', name: 'Pro', why: 'Every Pro moves quest', goal: 5, count: p => doneIn(p, 3) },
+  { id: 'power-user', name: 'Power User', why: 'Every Power user quest', goal: 5, count: p => doneIn(p, 4) },
+  { id: 'expert', name: 'Expert', why: 'Every Expert quest', goal: 5, count: p => doneIn(p, 5) },
+  { id: 'grandmaster', name: 'Grandmaster', why: 'Every Master quest', goal: 5, count: p => doneIn(p, 6) },
+  { id: 'scholar', name: 'Scholar', why: 'Every quest quiz answered right', goal: QUIZZED, count: p => p.quizzes.length },
+  { id: 'early-adopter', name: 'Early Adopter', why: 'Tried 3 new features', goal: 3, count: p => p.tried.length },
+  { id: 'reader', name: 'Reader', why: '5 daily docs quests', goal: 5, count: p => p.daily.length },
+  { id: 'bookworm', name: 'Bookworm', why: '50 daily docs quests', goal: 50, count: p => p.daily.length },
+  { id: 'on-fire', name: 'On Fire', why: 'A 7-day streak', goal: 7, count: p => p.bestStreak },
+  { id: 'unstoppable', name: 'Unstoppable', why: 'A 30-day streak', goal: 30, count: p => p.bestStreak },
+  { id: 'sharp-memory', name: 'Sharp Memory', why: '10 questions mastered', goal: 10, count: p => p.mastered },
+  { id: 'elephant', name: 'Elephant', why: '100 questions mastered', goal: 100, count: p => p.mastered },
+  { id: 'boss-slayer', name: 'Boss Slayer', why: 'Beat a weekly boss', goal: 1, count: p => p.bosses },
+  { id: 'boss-hunter', name: 'Boss Hunter', why: 'Beat 10 weekly bosses', goal: 10, count: p => p.bosses },
 ]
 
 /**
@@ -242,15 +450,42 @@ export type Progress = {
   quizzes: readonly string[]
   daily: readonly string[]
   streak: number
+  bestStreak: number
   lastDay: string
+  /** '' until you pick one. */
+  track: Track | ''
+  /** Questions in your memory bank at box MASTERED_BOX or above. */
+  mastered: number
+  /** Weekly bosses beaten, and review answers right. */
+  bosses: number
+  reviews: number
+  /** XP beyond the counted things: the harder tracks' daily extra. */
+  bonus?: number
 }
 
-export const emptyProgress = (): Progress => ({ done: [], tried: [], quizzes: [], daily: [], streak: 0, lastDay: '' })
+export const emptyProgress = (): Progress => ({
+  done: [],
+  tried: [],
+  quizzes: [],
+  daily: [],
+  streak: 0,
+  bestStreak: 0,
+  lastDay: '',
+  track: '',
+  mastered: 0,
+  bosses: 0,
+  reviews: 0,
+})
+
+/** XP for a review answered right, and for beating the weekly boss. */
+export const REVIEW_XP = 5
+export const BOSS_XP = 100
 
 export function xpOf(progress: Progress): number {
   let xp = 0
   for (const quest of QUESTS) if (progress.done.includes(quest.id)) xp += QUEST_XP[quest.level]
-  return xp + progress.tried.length * NEW_XP + progress.daily.length * DAILY_XP
+  // Daily quests counted at the Beginner rate; the extra of harder tracks is in `bonus`.
+  return xp + progress.tried.length * NEW_XP + progress.daily.length * DAILY_XP + progress.reviews * REVIEW_XP + progress.bosses * BOSS_XP + (progress.bonus ?? 0)
 }
 
 /** The local day of a time, as YYYY-MM-DD. */
@@ -263,48 +498,74 @@ export function dayOf(ms: number): string {
 /** The streak after earning XP on `today`: one more day in a row, or a new start. */
 export function withStreak(progress: Progress, today: string): Progress {
   if (progress.lastDay === today) return progress
-  const yesterday = dayOf(new Date(`${today}T12:00:00`).getTime() - 24 * 60 * 60 * 1000)
-  const streak = progress.lastDay === yesterday ? progress.streak + 1 : 1
-  return { ...progress, streak, lastDay: today }
+  const streak = progress.lastDay === addDays(today, -1) ? progress.streak + 1 : 1
+  return { ...progress, streak, bestStreak: Math.max(progress.bestStreak, streak), lastDay: today }
+}
+
+/** The day `n` days after `day` (YYYY-MM-DD). */
+export function addDays(day: string, n: number): string {
+  return dayOf(new Date(`${day}T12:00:00`).getTime() + n * 24 * 60 * 60 * 1000)
+}
+
+/** The ISO week of a day, as YYYY-Www: the weekly boss's key. */
+export function weekOf(day: string): string {
+  const d = new Date(`${day}T12:00:00`)
+  const thursday = new Date(d.getTime() + (3 - ((d.getDay() + 6) % 7)) * 24 * 60 * 60 * 1000)
+  const yearStart = new Date(thursday.getFullYear(), 0, 1, 12)
+  const week = 1 + Math.floor((thursday.getTime() - yearStart.getTime()) / (7 * 24 * 60 * 60 * 1000))
+  return `${thursday.getFullYear()}-W${String(week).padStart(2, '0')}`
 }
 
 /** The streak as it stands today: 0 once a day was missed. */
 export function streakOn(progress: Progress, today: string): number {
   if (progress.lastDay === '') return 0
-  const yesterday = dayOf(new Date(`${today}T12:00:00`).getTime() - 24 * 60 * 60 * 1000)
-  return progress.lastDay === today || progress.lastDay === yesterday ? progress.streak : 0
+  return progress.lastDay === today || progress.lastDay === addDays(today, -1) ? progress.streak : 0
 }
 
-/** The quest to suggest: the first not done, in course order. */
+/**
+ * The quest to suggest: the first not done in your track's levels, then the
+ * rest in course order; passed-over ones last.
+ */
 export function nextQuest(progress: Progress, skipped: readonly string[] = []): Quest | undefined {
+  const levels: readonly QuestLevel[] = isTrack(progress.track) ? TRACKS[progress.track].levels : [1, 2]
   const open = QUESTS.filter(q => !progress.done.includes(q.id))
-  return open.find(q => !skipped.includes(q.id)) ?? open[0]
+  const ordered = [...open.filter(q => levels.includes(q.level)), ...open.filter(q => !levels.includes(q.level))]
+  return ordered.find(q => !skipped.includes(q.id)) ?? ordered[0]
 }
 
-/** Level from XP: 50 XP a level, starting at 1. */
+/**
+ * Levels from XP, each a little longer than the one before: level L needs
+ * 50·L XP to reach L+1, so the first levels come in a day and level 20 in
+ * months.
+ */
 export function levelOf(xp: number): { level: number; into: number; size: number } {
-  const size = 50
-  return { level: Math.floor(xp / size) + 1, into: xp % size, size }
+  const level = Math.max(1, Math.floor((1 + Math.sqrt(1 + (4 * Math.max(0, xp)) / 25)) / 2))
+  const start = 25 * level * (level - 1)
+  return { level, into: xp - start, size: 50 * level }
+}
+
+/** Your title by level. */
+export function rankOf(level: number): string {
+  return level >= 35 ? 'Legend' : level >= 20 ? 'Master' : level >= 10 ? 'Expert' : level >= 5 ? 'Builder' : 'Apprentice'
+}
+
+function doneIn(progress: Progress, level: QuestLevel): number {
+  return QUESTS.filter(q => q.level === level && progress.done.includes(q.id)).length
 }
 
 export function badgesOf(progress: Progress): Badge[] {
-  const all = (level: number) => QUESTS.filter(q => q.level === level).every(q => progress.done.includes(q.id))
-  const quizzed = QUESTS.filter(q => q.quiz !== undefined).every(q => progress.quizzes.includes(q.id))
-  const earned: Record<string, boolean> = {
-    'first-steps': all(1),
-    speedrunner: all(2),
-    pro: all(3),
-    scholar: quizzed,
-    'early-adopter': progress.tried.length >= 3,
-    reader: progress.daily.length >= 5,
-    'on-fire': progress.streak >= 7,
-  }
-  return BADGES.filter(badge => earned[badge.id])
+  return BADGES.filter(badge => badge.count(progress) >= badge.goal)
 }
 
 /** Whether something that happened completes a quest's watch. */
-export function matches(watch: Watch | undefined, event: Event): boolean {
-  if (watch === undefined || watch.kind !== event.kind) return false
+export function matches(watch: Watch | readonly Watch[] | undefined, event: Event): boolean {
+  if (watch === undefined) return false
+  if (Array.isArray(watch)) return (watch as readonly Watch[]).some(w => matches(w, event))
+  return matchesOne(watch as Watch, event)
+}
+
+function matchesOne(watch: Watch, event: Event): boolean {
+  if (watch.kind !== event.kind) return false
   switch (watch.kind) {
     case 'prompt':
       return event.kind === 'prompt' && (watch.pattern === undefined || watch.pattern.test(event.text))
@@ -317,6 +578,8 @@ export function matches(watch: Watch | undefined, event: Event): boolean {
       return event.kind === 'file' && event.path === watch.path
     case 'settings':
       return event.kind === 'settings' && event.key === watch.key
+    case 'command':
+      return event.kind === 'command' && watch.names.includes(event.name)
     default:
       return true
   }
@@ -330,7 +593,8 @@ export type Event =
   | { kind: 'skill' }
   | { kind: 'compact' }
   | { kind: 'file'; path: string }
-  | { kind: 'settings'; key: 'hooks' | 'allow' }
+  | { kind: 'settings'; key: 'hooks' | 'allow' | 'statusLine' }
+  | { kind: 'command'; name: string }
 
 /** The quests an event completes that are not done yet. */
 export function completedBy(event: Event, progress: Progress): Quest[] {
@@ -397,11 +661,22 @@ function hash(text: string): string {
 
 // ---- The daily docs quest -----------------------------------------------------
 
-export type DocsPage = { path: string; title: string; about: string; url: string }
+export type DocsPage = { path: string; title: string; about: string; url: string; track: Track }
 
-// Pages for operators, admins and SDK builders, not for learning to use Claude Code.
+// Pages for operators, admins and the like, not for learning to use Claude Code.
 const NOT_FOR_LEARNING =
-  /^(agent-sdk\/|whats-new\/|changelog|admin|setup|managed-|server-managed|claude-apps-gateway|llm-gateway|gateways|self-hosted|amazon-bedrock|google-vertex|microsoft-foundry|claude-platform-on-aws|third-party|network-config|corporate-launcher|hipaa|zero-data|legal|data-usage|analytics|monitoring-usage|communications-kit|champion-kit|troubleshoot|errors|feature-availability|authentication|plugins\/(org|host-marketplace|marketplace-reference|manifest-reference|cli-reference|measure|cli-hints|relevance)|plugin-evals|plugins\/mods\/|env-vars|settings-reference|settings-example|glossary|tools-reference|channels-reference)/
+  /^(agent-sdk\/(?!overview|quickstart|agent-loop)|whats-new\/|changelog|admin|setup|managed-|server-managed|claude-apps-gateway|llm-gateway|gateways|self-hosted|amazon-bedrock|google-vertex|microsoft-foundry|claude-platform-on-aws|third-party|network-config|corporate-launcher|hipaa|zero-data|legal|data-usage|analytics|monitoring-usage|communications-kit|champion-kit|troubleshoot|errors|feature-availability|authentication|plugins\/(org|host-marketplace|marketplace-reference|manifest-reference|cli-reference|measure|cli-hints|relevance|loading|troubleshooting)|plugin-evals|plugins\/mods\/(?!overview|create)|env-vars|settings-reference|settings-example|glossary|tools-reference|channels-reference|cli-reference)/
+
+const BEGINNER_PAGES =
+  /^(overview|quickstart|how-claude-code-works|features-overview|common-workflows|best-practices|memory|context-window|interactive-mode|checkpointing|commands|permission-modes|costs|model-config|sessions|prompt-library|vs-code|jetbrains|desktop|desktop-quickstart|web-quickstart|mobile|terminal-config|keybindings|output-styles|fast-mode|voice-dictation|accessibility|fullscreen|claude-directory|platforms)$/
+
+const PRO_PAGES =
+  /^(headless|github-actions|github-actions-cloud-providers|gitlab-ci-cd|agents|agent-teams|agent-view|workflows|cross-session-messaging|goal|channels|deep-links|devcontainer|sandboxing|sandbox-environments|security|security-guidance|claude-security|routines|scheduled-tasks|desktop-scheduled-tasks|large-codebases|prompt-caching|worktrees|remote-control|code-review|ultrareview|computer-use|auto-mode-config|claude-code-on-the-web|cloud-environments|plugins\/(create|components|publish|dependencies|create-marketplace)|plugins\/mods\/(overview|create)|agent-sdk\/.*)$/
+
+/** Which track a docs page belongs to. */
+export function trackOfPage(path: string): Track {
+  return BEGINNER_PAGES.test(path) ? 'beginner' : PRO_PAGES.test(path) ? 'pro' : 'advanced'
+}
 
 /** The docs pages worth a daily quest, from the docs index (llms.txt). */
 export function docsPages(index: string): DocsPage[] {
@@ -412,15 +687,19 @@ export function docsPages(index: string): DocsPage[] {
     if (match === null) continue
     const [, title = '', url = '', path = '', about = ''] = match
     if (NOT_FOR_LEARNING.test(path)) continue
-    pages.push({ path, title, about, url })
+    pages.push({ path, title, about, url, track: trackOfPage(path) })
   }
   return pages
 }
 
-/** Today's page: the same all day, one not done yet when there is one. */
-export function pickDaily(pages: readonly DocsPage[], done: readonly string[], day: string): DocsPage | undefined {
+/**
+ * Today's page: the same all day, from your track, one not done yet when
+ * there is one (then from any track, then any page again).
+ */
+export function pickDaily(pages: readonly DocsPage[], done: readonly string[], day: string, track: Track = 'beginner'): DocsPage | undefined {
   const open = pages.filter(page => !done.includes(page.path))
-  const pool = open.length > 0 ? open : pages
+  const mine = open.filter(page => page.track === track)
+  const pool = mine.length > 0 ? mine : open.length > 0 ? open : pages
   if (pool.length === 0) return undefined
   return pool[Number.parseInt(hash(day), 36) % pool.length]
 }
@@ -438,24 +717,100 @@ export function parseQuiz(text: string): DailyQuiz | undefined {
     for (const q of data.questions as { ask?: unknown; options?: unknown; answer?: unknown }[]) {
       if (typeof q.ask !== 'string' || !Array.isArray(q.options) || typeof q.answer !== 'number') return undefined
       const options = q.options.filter((o): o is string => typeof o === 'string')
-      if (options.length < 2 || options.length !== q.options.length || q.answer < 0 || q.answer >= options.length) return undefined
+      if (options.length < 2 || options.length > 5 || options.length !== q.options.length || q.answer < 0 || q.answer >= options.length) return undefined
       // Claude tends to put the right answer first: shuffle, the same way each time.
       const right = options[q.answer] as string
       const shuffled = [...options].sort((a, b) => hash(q.ask + a).localeCompare(hash(q.ask + b)))
       questions.push({ ask: q.ask, options: shuffled, answer: shuffled.indexOf(right) })
     }
     if (questions.length === 0) return undefined
-    return { summary: data.summary, questions: questions.slice(0, 3) }
+    return { summary: data.summary, questions: questions.slice(0, 4) }
   } catch {
     return undefined
   }
 }
 
-/** How Claude is asked to write the daily quiz, from the page's own text only. */
-export const QUIZ_SYSTEM =
-  'You write a short quiz about one page of the official Claude Code docs, for a Claude Code user. ' +
-  'Use only facts stated in the page text you are given; never add facts from elsewhere. ' +
-  'Answer with JSON only: {"summary": "<one plain sentence, at most 30 words: what the page teaches and why it helps>", ' +
-  '"questions": [{"ask": "<question>", "options": ["<a>", "<b>", "<c>"], "answer": <index of the right option>}]} ' +
-  'with exactly 3 questions about practical things a user does (commands, keys, settings, when to use it), ' +
-  'each with 3 short options, exactly one right. No markdown, no backticks.'
+/** How Claude is asked to write the daily quiz, from the page's own text only, at your track's level. */
+export function quizSystem(track: Track): string {
+  const { questions, options } = TRACKS[track]
+  const level =
+    track === 'beginner'
+      ? 'The reader is new to Claude Code: ask what a feature is for, when to use it, and the basic command or key.'
+      : track === 'advanced'
+        ? 'The reader uses Claude Code every day: ask about specific commands, flags, settings and how features behave.'
+        : 'The reader is an expert: ask scenario questions ("You want X: what do you do?"), limits, edge cases and how features combine, ' +
+          'as the page states them. Wrong options must be plausible.'
+  return (
+    'You write a short quiz about one page of the official Claude Code docs. ' +
+    `${level} ` +
+    'Use only facts stated in the page text you are given; never add facts from elsewhere. ' +
+    'Answer with JSON only: {"summary": "<one plain sentence, at most 30 words: what the page teaches and why it helps>", ' +
+    `"questions": [{"ask": "<question>", "options": [<${options} short options>], "answer": <index of the right option>}]} ` +
+    `with exactly ${questions} questions about practical things a user does, each with ${options} options, exactly one right. ` +
+    'Keep the options about the same length and style, so the right one never stands out. No markdown, no backticks.'
+  )
+}
+
+// ---- Your memory bank: spaced review ------------------------------------------
+
+/**
+ * A question you answered, kept to ask again: right answers push it further
+ * away (box up), a wrong one brings it back tomorrow (box 0).
+ */
+export type BankItem = {
+  id: string
+  ask: string
+  options: readonly string[]
+  answer: number
+  path: string
+  title: string
+  url: string
+  box: number
+  due: string
+}
+
+/** Days until the next review, by box: wrong (box 0) tomorrow, then 3, 7, 14, 30, 60 and 120 days. */
+export const INTERVALS = [1, 3, 7, 14, 30, 60, 120] as const
+/** From this box on, a question counts as mastered (a 30-day interval). */
+export const MASTERED_BOX = 4
+
+export function bankItem(question: Question, page: { path: string; title: string; url: string }, isRight: boolean, today: string): BankItem {
+  return schedule(
+    { id: `${page.path}:${hash(question.ask)}`, ...question, ...page, box: 0, due: today },
+    isRight,
+    today,
+  )
+}
+
+/** The item after an answer today. */
+export function schedule(item: BankItem, isRight: boolean, today: string): BankItem {
+  const box = isRight ? Math.min(item.box + 1, INTERVALS.length - 1) : 0
+  return { ...item, box, due: addDays(today, INTERVALS[box] ?? 1) }
+}
+
+/** The questions due today, oldest first, at most `max`. */
+export function dueToday(bank: readonly BankItem[], today: string, max = 5): BankItem[] {
+  return bank
+    .filter(item => item.due <= today)
+    .sort((a, b) => a.due.localeCompare(b.due) || a.box - b.box)
+    .slice(0, max)
+}
+
+export const masteredIn = (bank: readonly BankItem[]): number => bank.filter(item => item.box >= MASTERED_BOX).length
+
+/** The weekly boss: 5 questions from different pages of your bank, the same all week; undefined while the bank is too small. */
+export function bossFor(bank: readonly BankItem[], week: string): BankItem[] | undefined {
+  const pages = new Set(bank.map(item => item.path))
+  if (bank.length < 8 || pages.size < 3) return undefined
+  const sorted = [...bank].sort((a, b) => hash(week + a.id).localeCompare(hash(week + b.id)))
+  const picked: BankItem[] = []
+  const used = new Set<string>()
+  for (const item of sorted) {
+    if (picked.length >= 5) break
+    if (used.has(item.path) && used.size < pages.size) continue
+    picked.push(item)
+    used.add(item.path)
+  }
+  for (const item of sorted) if (picked.length < 5 && !picked.includes(item)) picked.push(item)
+  return picked
+}

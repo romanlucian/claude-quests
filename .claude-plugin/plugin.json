@@ -1,7 +1,7 @@
 {
   "name": "quests",
-  "version": "0.2.0",
-  "description": "Learn Claude Code by doing: quests, a daily docs quest, streaks, badges and levels, plus new features from the changelog",
+  "version": "0.3.0",
+  "description": "Learn Claude Code by doing: 30 quests, Beginner/Advanced/Pro tracks, daily docs quizzes, spaced review, a weekly boss, ranks and badges",
   "author": {
     "name": "Lucian Roman"
   },

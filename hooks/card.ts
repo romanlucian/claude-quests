@@ -6,10 +6,12 @@ import { BADGES, levelOf } from './quests'
 
 export type CardData = {
   xp: number
+  rank: string
   done: number // core quests done
   total: number // core quests
   daily: number // daily docs quests done
   tried: number // new features tried
+  mastered: number // questions mastered
   streak: number
   badges: readonly string[] // earned badge ids
   date: string
@@ -19,19 +21,22 @@ const escape = (text: string) => text.replace(/[&<>"']/g, c => `&#${c.charCodeAt
 
 export function cardHtml(data: CardData): string {
   const { level, into, size } = levelOf(data.xp)
-  // Earned badges first: the row shows as many as fit.
-  const badges = BADGES.map(badge => ({ name: badge.name, isEarned: data.badges.includes(badge.id) })).sort(
-    (a, b) => Number(b.isEarned) - Number(a.isEarned),
-  )
+  // Earned badges first, the hardest (latest in the list) leading: the row
+  // shows as many as fit.
+  const badges = BADGES.map((badge, i) => ({ name: badge.name, isEarned: data.badges.includes(badge.id), i }))
+    .sort((a, b) => Number(b.isEarned) - Number(a.isEarned) || (a.isEarned ? b.i - a.i : a.i - b.i))
+    .map(({ name, isEarned }) => ({ name, isEarned }))
   const payload = JSON.stringify({
     level,
     into,
     size,
     xp: data.xp,
+    rank: data.rank,
     done: data.done,
     total: data.total,
     daily: data.daily,
     tried: data.tried,
+    mastered: data.mastered,
     streak: data.streak,
     badges,
     date: data.date,
@@ -41,7 +46,7 @@ export function cardHtml(data: CardData): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Code quests: level ${level}</title>
+<title>Claude Code quests: ${escape(data.rank)}, level ${level}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -77,9 +82,9 @@ function draw() {
   for (let x = 0; x < 1200; x += 24) { ctx.fillRect(x, 0, 12, 6); ctx.fillRect(x + 12, 669, 12, 6) }
 
   ctx.fillStyle = ACCENT; ctx.font = '600 22px "IBM Plex Mono"'; ctx.textBaseline = 'alphabetic'
-  ctx.fillText('■ CLAUDE CODE QUESTS', 72, 96)
+  ctx.fillText('■ CLAUDE CODE QUESTS · ' + D.rank.toUpperCase(), 72, 96)
 
-  ctx.fillStyle = TEXT; ctx.font = '700 132px Silkscreen'
+  ctx.fillStyle = TEXT; ctx.font = '700 ' + (D.level < 10 ? 132 : D.level < 100 ? 108 : 88) + 'px Silkscreen'
   ctx.fillText('LEVEL ' + D.level, 64, 250)
 
   // XP bar to the next level.
@@ -93,7 +98,7 @@ function draw() {
   ctx.fillText(D.done + ' / ' + D.total + ' quests', 72, 420)
   const extras = []
   if (D.streak > 0) extras.push('🔥 ' + D.streak + '-day streak')
-  extras.push(D.daily + ' daily', D.tried + ' new features')
+  extras.push(D.daily + ' daily', D.mastered + ' mastered')
   ctx.fillStyle = DIM; ctx.font = '400 22px "IBM Plex Mono"'
   ctx.fillText(extras.join('  ·  '), 72, 462)
 

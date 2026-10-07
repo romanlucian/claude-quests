@@ -19,11 +19,11 @@ Then type `/quests`.
 
 ## What's inside
 
-**The pane is simple**: a 📅 daily quest, your ▶ next quest (with
-*Another one* to pick a different one), and the three levels folded into
-one line each; open a level to choose any quest in it.
+**Pick your track**: Beginner, Advanced or Pro. It sets where you start, which
+docs pages your daily quest comes from, and how hard the questions are
+(Pro: real scenarios, limits and edge cases, 4 options). Change it any time.
 
-**15 quests in 3 levels**, each linked to its page in the
+**30 quests in 6 levels**, each linked to its page in the
 [official docs](https://code.claude.com/docs):
 
 | Level | Quests |
@@ -31,43 +31,57 @@ one line each; open a level to choose any quest in it.
 | First steps (10 XP) | Ask about your project · Point at a file with @ · Let Claude explore · Let Claude change a file · Let Claude run a command |
 | Getting faster (20 XP) | Plan mode · CLAUDE.md memory · Keep the context fresh · Undo with rewind · Look something up on the web |
 | Pro moves (30 XP) | Subagents · Skills · MCP · Hooks · Permissions |
+| Power user (40 XP) | /context · /model · /resume · /branch · /usage |
+| Expert (50 XP) | Your own subagent · your own skill · a shared .mcp.json · /statusline · /plugin |
+| Master (60 XP) | Worktrees · /background · claude -p in scripts · /security-review · /loop and /schedule |
 
-Most quests **complete automatically**: the mod watches what happens in your
-session (the prompt you send, the tools Claude uses, a subagent starting, a
-`CLAUDE.md` in your project, hooks and allow rules in your settings). A few
-have a short quiz instead, one question at a time. Every quest also has
-"I did it".
+Most quests **complete automatically**: the mod watches your session (the
+prompt you send, the tools Claude uses, the slash commands you run, a
+subagent starting, files like `CLAUDE.md`, `.claude/agents`, `.mcp.json`, and
+hooks, allow rules or a status line in your settings). A few have a short
+quiz instead, one question at a time. Every quest also has "I did it".
 
-**📅 A daily docs quest**: each day the mod picks one page of the official
-docs you have not done yet (about 95 pages for learning, not admin or SDK
-pages) and, when you press *Start*, Claude Haiku reads that page and writes
-3 questions from it, with only facts from the page. +25 XP. Answers are
-shuffled. The link to the page is always there.
+**📅 A daily docs quest**: each day, one page of the official docs from your
+track that you haven't done (about 95 learning pages). When you press
+*Start*, Claude Haiku reads the page and writes questions from it, with only
+facts from that page, at your track's level; answers are shuffled. +25,
++35 or +50 XP.
 
-**🔥 Streaks**: every day you earn XP keeps your streak going; it shows in
-the pane and on your card.
+**🔁 Your memory bank: spaced review**. Every daily question is saved. A
+question you get right comes back after 3, 7, 14, 30, 60 and 120 days; a
+miss comes back tomorrow. Up to 5 reviews a day, +5 XP each. At the 30-day
+step a question counts as *mastered*. This is what makes it still worth
+opening after six months: you keep what you learned.
+
+**⚔️ A weekly boss**: once your bank has questions from 3 pages, every week
+brings a boss: 5 questions from different pages, one mistake allowed. Lose,
+and try again the next day. +100 XP.
+
+**🔥 Streaks, levels and ranks**: every day with XP keeps your streak going.
+Levels get longer as you go (level 2 in a day, level 20 in months), with a
+rank: Apprentice, Builder (5), Expert (10), Master (20), Legend (35).
+
+**16 badges**, from your first day to half a year: one per level, Scholar,
+Early Adopter, Reader (5 daily) and Bookworm (50), On Fire (7-day streak)
+and Unstoppable (30), Sharp Memory (10 mastered) and Elephant (100), Boss
+Slayer and Boss Hunter (10 bosses). The **Me** tab shows each one's progress.
 
 **⭐ New**: features from the official
 [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md),
-read once or twice a day, keeping the features a user can try (not the
-lines for mod, SDK or admin work). Each one has an **Explain** button (Claude Haiku, on
-your own account, explains the line in plain words and says how to try it)
-and **I tried it** (+15 XP). Features newer than your Claude Code say to
-update first. A link goes to the official *This week in Claude Code* page.
+read once or twice a day, keeping the features a user can try (not the lines
+for mod, SDK or admin work). **Explain** asks Claude Haiku to explain one in
+plain words; **I tried it** gives +15 XP.
 
-**Levels and badges**: 50 XP a level. Badges: First Steps, Speedrunner, Pro,
-Scholar (every quiz), Early Adopter (3 new features tried), Reader (5 daily
-quests) and On Fire (a 7-day streak). The Badges tab shows how far you are.
-
-**Share card**: the *Share card* button (or `/quests card`) opens your card in
-the browser; *Download PNG* saves it, ready for X.
+**Share card**: the *Share card* button (or `/quests card`) opens your card,
+with your rank, level, streak and badges; *Download PNG* saves it for X.
 
 ## Good to know
 
 - Progress is kept on your computer (the mod's own store), across sessions.
 - Only two things use your Claude usage, and only when you press them:
   *Explain* (one small Haiku call per line, kept so it never asks twice) and
-  *Start today's quiz* (one Haiku call that reads one docs page).
+  *Start today's quiz* (one Haiku call a day that reads one docs page).
+  Reviews and the weekly boss reuse your saved questions: no Claude calls.
 - The mod reads only public pages: the changelog on GitHub and the docs at
   code.claude.com. Nothing about you is sent anywhere.
 - Claude Code changes fast. The quests are short and link the docs, which
