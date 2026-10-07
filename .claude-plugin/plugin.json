@@ -1,7 +1,7 @@
 {
   "name": "quests",
-  "version": "0.1.1",
-  "description": "Learn Claude Code by doing: quests, badges and levels in a pane, plus new features from the changelog",
+  "version": "0.2.0",
+  "description": "Learn Claude Code by doing: quests, a daily docs quest, streaks, badges and levels, plus new features from the changelog",
   "author": {
     "name": "Lucian Roman"
   },

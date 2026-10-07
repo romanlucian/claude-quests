@@ -9,6 +9,7 @@
 export const DOCS = 'https://code.claude.com/docs/en'
 export const CHANGELOG_URL = 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md'
 export const WHATS_NEW_URL = `${DOCS}/whats-new/index`
+export const DOCS_INDEX_URL = 'https://code.claude.com/docs/llms.txt'
 
 /** What the mod watches for a quest to complete it by itself. */
 export type Watch =
@@ -40,6 +41,8 @@ export const LEVEL_NAMES = { 1: 'First steps', 2: 'Getting faster', 3: 'Pro move
 export const QUEST_XP = { 1: 10, 2: 20, 3: 30 } as const
 /** XP for trying a feature from the New tab. */
 export const NEW_XP = 15
+/** XP for the daily docs quest. */
+export const DAILY_XP = 25
 
 export const QUESTS: readonly Quest[] = [
   {
@@ -224,17 +227,58 @@ export const BADGES: readonly Badge[] = [
   { id: 'pro', name: 'Pro', why: 'Every level 3 quest' },
   { id: 'scholar', name: 'Scholar', why: 'Every quiz answered right' },
   { id: 'early-adopter', name: 'Early Adopter', why: 'Tried 3 new features' },
+  { id: 'reader', name: 'Reader', why: '5 daily docs quests' },
+  { id: 'on-fire', name: 'On Fire', why: 'A 7-day streak' },
 ]
 
-/** Progress as it is kept: quest ids done, new features tried. */
-export type Progress = { done: readonly string[]; tried: readonly string[]; quizzes: readonly string[] }
+/**
+ * Progress as it is kept: quest ids done, new features tried, quizzes
+ * passed, daily docs pages done, and the streak: days in a row with XP,
+ * the last of them `lastDay` (YYYY-MM-DD, local time).
+ */
+export type Progress = {
+  done: readonly string[]
+  tried: readonly string[]
+  quizzes: readonly string[]
+  daily: readonly string[]
+  streak: number
+  lastDay: string
+}
 
-export const emptyProgress = (): Progress => ({ done: [], tried: [], quizzes: [] })
+export const emptyProgress = (): Progress => ({ done: [], tried: [], quizzes: [], daily: [], streak: 0, lastDay: '' })
 
 export function xpOf(progress: Progress): number {
   let xp = 0
   for (const quest of QUESTS) if (progress.done.includes(quest.id)) xp += QUEST_XP[quest.level]
-  return xp + progress.tried.length * NEW_XP
+  return xp + progress.tried.length * NEW_XP + progress.daily.length * DAILY_XP
+}
+
+/** The local day of a time, as YYYY-MM-DD. */
+export function dayOf(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** The streak after earning XP on `today`: one more day in a row, or a new start. */
+export function withStreak(progress: Progress, today: string): Progress {
+  if (progress.lastDay === today) return progress
+  const yesterday = dayOf(new Date(`${today}T12:00:00`).getTime() - 24 * 60 * 60 * 1000)
+  const streak = progress.lastDay === yesterday ? progress.streak + 1 : 1
+  return { ...progress, streak, lastDay: today }
+}
+
+/** The streak as it stands today: 0 once a day was missed. */
+export function streakOn(progress: Progress, today: string): number {
+  if (progress.lastDay === '') return 0
+  const yesterday = dayOf(new Date(`${today}T12:00:00`).getTime() - 24 * 60 * 60 * 1000)
+  return progress.lastDay === today || progress.lastDay === yesterday ? progress.streak : 0
+}
+
+/** The quest to suggest: the first not done, in course order. */
+export function nextQuest(progress: Progress, skipped: readonly string[] = []): Quest | undefined {
+  const open = QUESTS.filter(q => !progress.done.includes(q.id))
+  return open.find(q => !skipped.includes(q.id)) ?? open[0]
 }
 
 /** Level from XP: 50 XP a level, starting at 1. */
@@ -252,6 +296,8 @@ export function badgesOf(progress: Progress): Badge[] {
     pro: all(3),
     scholar: quizzed,
     'early-adopter': progress.tried.length >= 3,
+    reader: progress.daily.length >= 5,
+    'on-fire': progress.streak >= 7,
   }
   return BADGES.filter(badge => earned[badge.id])
 }
@@ -296,6 +342,19 @@ export function completedBy(event: Event, progress: Progress): Quest[] {
 export type NewFeature = { key: string; version: string; text: string }
 
 /**
+ * Whether a changelog line is something a Claude Code user tries, not an
+ * API for mod, SDK or script authors or a knob for operators.
+ */
+export function isUserFacing(text: string): boolean {
+  return !(
+    /\$\.[a-z]/.test(text) || // the mods API
+    /\bmods?\b|\bmod's\b|\bplugin hooks?\b|\btypings\b|\bSDK\b|\bpayload\b|\bschema\b|\bgateway\b|managed settings/i.test(text) ||
+    /\b[A-Z][A-Z0-9]*_[A-Z0-9_]{3,}\b/.test(text) || // an environment variable
+    /\b(event|events) (a|that) (mod|plugin)/i.test(text)
+  )
+}
+
+/**
  * The "Added" lines of the newest versions in the changelog (bug fixes and
  * the like left out): the features to try. `limit` features at most.
  */
@@ -311,6 +370,7 @@ export function newFeatures(changelog: string, limit = 8): NewFeature[] {
     const item = /^[-*]\s+(Added|New:?)\s+(.+)$/.exec(line.trim())
     if (version === '' || item === null) continue
     const text = `${item[1] === 'Added' ? 'Added' : 'New'} ${item[2] ?? ''}`.trim()
+    if (!isUserFacing(text)) continue
     features.push({ key: `${version}:${hash(text)}`, version, text })
     if (features.length >= limit) break
   }
@@ -334,3 +394,68 @@ function hash(text: string): string {
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619)
   return (h >>> 0).toString(36)
 }
+
+// ---- The daily docs quest -----------------------------------------------------
+
+export type DocsPage = { path: string; title: string; about: string; url: string }
+
+// Pages for operators, admins and SDK builders, not for learning to use Claude Code.
+const NOT_FOR_LEARNING =
+  /^(agent-sdk\/|whats-new\/|changelog|admin|setup|managed-|server-managed|claude-apps-gateway|llm-gateway|gateways|self-hosted|amazon-bedrock|google-vertex|microsoft-foundry|claude-platform-on-aws|third-party|network-config|corporate-launcher|hipaa|zero-data|legal|data-usage|analytics|monitoring-usage|communications-kit|champion-kit|troubleshoot|errors|feature-availability|authentication|plugins\/(org|host-marketplace|marketplace-reference|manifest-reference|cli-reference|measure|cli-hints|relevance)|plugin-evals|plugins\/mods\/|env-vars|settings-reference|settings-example|glossary|tools-reference|channels-reference)/
+
+/** The docs pages worth a daily quest, from the docs index (llms.txt). */
+export function docsPages(index: string): DocsPage[] {
+  const pages: DocsPage[] = []
+  const line = /^- \[([^\]]+)\]\((https:\/\/code\.claude\.com\/docs\/en\/([a-z0-9/-]+))\.md\):?\s*(.*)$/
+  for (const raw of index.split('\n')) {
+    const match = line.exec(raw.trim())
+    if (match === null) continue
+    const [, title = '', url = '', path = '', about = ''] = match
+    if (NOT_FOR_LEARNING.test(path)) continue
+    pages.push({ path, title, about, url })
+  }
+  return pages
+}
+
+/** Today's page: the same all day, one not done yet when there is one. */
+export function pickDaily(pages: readonly DocsPage[], done: readonly string[], day: string): DocsPage | undefined {
+  const open = pages.filter(page => !done.includes(page.path))
+  const pool = open.length > 0 ? open : pages
+  if (pool.length === 0) return undefined
+  return pool[Number.parseInt(hash(day), 36) % pool.length]
+}
+
+export type DailyQuiz = { summary: string; questions: Question[] }
+
+/** The quiz Claude wrote for a page, checked: 3 questions of 3 options each. */
+export function parseQuiz(text: string): DailyQuiz | undefined {
+  const json = /\{[\s\S]*\}/.exec(text)?.[0]
+  if (json === undefined) return undefined
+  try {
+    const data = JSON.parse(json) as { summary?: unknown; questions?: unknown }
+    if (typeof data.summary !== 'string' || !Array.isArray(data.questions)) return undefined
+    const questions: Question[] = []
+    for (const q of data.questions as { ask?: unknown; options?: unknown; answer?: unknown }[]) {
+      if (typeof q.ask !== 'string' || !Array.isArray(q.options) || typeof q.answer !== 'number') return undefined
+      const options = q.options.filter((o): o is string => typeof o === 'string')
+      if (options.length < 2 || options.length !== q.options.length || q.answer < 0 || q.answer >= options.length) return undefined
+      // Claude tends to put the right answer first: shuffle, the same way each time.
+      const right = options[q.answer] as string
+      const shuffled = [...options].sort((a, b) => hash(q.ask + a).localeCompare(hash(q.ask + b)))
+      questions.push({ ask: q.ask, options: shuffled, answer: shuffled.indexOf(right) })
+    }
+    if (questions.length === 0) return undefined
+    return { summary: data.summary, questions: questions.slice(0, 3) }
+  } catch {
+    return undefined
+  }
+}
+
+/** How Claude is asked to write the daily quiz, from the page's own text only. */
+export const QUIZ_SYSTEM =
+  'You write a short quiz about one page of the official Claude Code docs, for a Claude Code user. ' +
+  'Use only facts stated in the page text you are given; never add facts from elsewhere. ' +
+  'Answer with JSON only: {"summary": "<one plain sentence, at most 30 words: what the page teaches and why it helps>", ' +
+  '"questions": [{"ask": "<question>", "options": ["<a>", "<b>", "<c>"], "answer": <index of the right option>}]} ' +
+  'with exactly 3 questions about practical things a user does (commands, keys, settings, when to use it), ' +
+  'each with 3 short options, exactly one right. No markdown, no backticks.'

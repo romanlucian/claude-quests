@@ -5,6 +5,25 @@ export type QuestProgress = {
   tried: readonly string[]
   /** Quests whose quiz you answered right. */
   quizzes: readonly string[]
+  /** Docs pages whose daily quest you did. */
+  daily: readonly string[]
+  /** Days in a row with XP, the last of them `lastDay` (YYYY-MM-DD). */
+  streak: number
+  lastDay: string
+}
+
+/** Today's docs quest. */
+export type QuestDaily = {
+  day: string
+  status: 'idle' | 'loading' | 'ready' | 'error' | 'done'
+  path: string
+  title: string
+  url: string
+  summary: string
+  questions: readonly { ask: string; options: readonly string[]; answer: number }[]
+  step: number
+  note: string
+  error: string
 }
 
 /** The New tab: features from the changelog. */
@@ -22,10 +41,15 @@ export type QuestNews = {
 /** What the pane shows. */
 export type QuestView = {
   tab: 'quests' | 'new' | 'badges'
-  selected: string
-  /** Answers picked in the open quiz, by question. */
-  answers: readonly number[]
+  /** The quest you picked from a level's list ('' for the next one). */
+  focus: string
+  /** The level whose quests are listed (0: none). */
+  openLevel: number
+  /** The question of the open quiz. */
+  step: number
   note: string
+  /** Quests passed over with "Another one". */
+  skipped: readonly string[]
 }
 
 declare module 'claude-code' {
@@ -33,6 +57,7 @@ declare module 'claude-code' {
     quests: {
       progress: QuestProgress
       news: QuestNews
+      daily: QuestDaily
       view: QuestView
     }
   }

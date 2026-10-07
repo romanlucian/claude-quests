@@ -6,8 +6,11 @@ import { BADGES, levelOf } from './quests'
 
 export type CardData = {
   xp: number
-  done: number
-  total: number
+  done: number // core quests done
+  total: number // core quests
+  daily: number // daily docs quests done
+  tried: number // new features tried
+  streak: number
   badges: readonly string[] // earned badge ids
   date: string
 }
@@ -16,8 +19,23 @@ const escape = (text: string) => text.replace(/[&<>"']/g, c => `&#${c.charCodeAt
 
 export function cardHtml(data: CardData): string {
   const { level, into, size } = levelOf(data.xp)
-  const badges = BADGES.map(badge => ({ name: badge.name, isEarned: data.badges.includes(badge.id) }))
-  const payload = JSON.stringify({ level, into, size, xp: data.xp, done: data.done, total: data.total, badges, date: data.date })
+  // Earned badges first: the row shows as many as fit.
+  const badges = BADGES.map(badge => ({ name: badge.name, isEarned: data.badges.includes(badge.id) })).sort(
+    (a, b) => Number(b.isEarned) - Number(a.isEarned),
+  )
+  const payload = JSON.stringify({
+    level,
+    into,
+    size,
+    xp: data.xp,
+    done: data.done,
+    total: data.total,
+    daily: data.daily,
+    tried: data.tried,
+    streak: data.streak,
+    badges,
+    date: data.date,
+  })
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -72,7 +90,12 @@ function draw() {
   ctx.fillText(D.xp + ' XP · ' + (D.size - D.into) + ' to level ' + (D.level + 1), 72, 356)
 
   ctx.fillStyle = TEXT; ctx.font = '600 44px "IBM Plex Mono"'
-  ctx.fillText(D.done + ' / ' + D.total + ' quests', 72, 440)
+  ctx.fillText(D.done + ' / ' + D.total + ' quests', 72, 420)
+  const extras = []
+  if (D.streak > 0) extras.push('🔥 ' + D.streak + '-day streak')
+  extras.push(D.daily + ' daily', D.tried + ' new features')
+  ctx.fillStyle = DIM; ctx.font = '400 22px "IBM Plex Mono"'
+  ctx.fillText(extras.join('  ·  '), 72, 462)
 
   // Badges.
   ctx.font = '600 20px "IBM Plex Mono"'
