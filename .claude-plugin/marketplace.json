@@ -1,0 +1,6 @@
+{
+  "name": "quests",
+  "description": "The quests mod: learn Claude Code by doing",
+  "owner": { "name": "Lucian Roman" },
+  "plugins": [{ "name": "quests", "source": "./" }]
+}

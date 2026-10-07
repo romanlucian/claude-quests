@@ -1,0 +1,12 @@
+{
+  "name": "quests",
+  "version": "0.1.0",
+  "description": "Learn Claude Code by doing: quests, badges and levels in a pane, plus new features from the changelog",
+  "author": {
+    "name": "Lucian Roman"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/romanlucian/claude-quests",
+  "repository": "https://github.com/romanlucian/claude-quests",
+  "types": "./types/index.d.ts"
+}
