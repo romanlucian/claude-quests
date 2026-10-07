@@ -4,7 +4,7 @@ A Claude Code mod that turns learning Claude Code into a game. Type `/quests`
 and a pane opens with short missions. You don't read a tutorial: you do the
 thing in your real project, and the quest completes by itself.
 
-![Quests: a Claude Code mod. The pane shows a Pro daily quiz on worktrees and hooks, a quest done, and a week card](docs/poster.png)
+![Quests: a Claude Code mod. The pane, with the pixel cat, shows a Pro daily quiz on worktrees and hooks; the cat says a quest is done](docs/poster.png)
 
 ## Install
 
