@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { cardHtml, weekCardHtml } from '../hooks/card'
+import { CAT_CELLS, CAT_COLUMNS, CAT_ROWS } from '../hooks/cat-pixels'
 import {
   addDays,
   badgesOf,
@@ -332,7 +333,7 @@ const PANE = {
 
 const start = { cwd: '/work', surface: 'terminal', isInteractive: true } as const
 
-function fakeHost(on: On, store: Record<string, unknown> = {}, blitDeny?: string) {
+function fakeHost(on: On, store: Record<string, unknown> = {}, blitDeny?: string, env: Record<string, string> = {}) {
   const toasts: string[] = []
   const written: { path: string; text: string }[] = []
   const spawned: string[][] = []
@@ -340,7 +341,7 @@ function fakeHost(on: On, store: Record<string, unknown> = {}, blitDeny?: string
   const asked: string[] = []
   const prompts: string[] = []
   const blits: string[] = []
-  mock.env(on, { HOME, TMPDIR: '/tmp/' })
+  mock.env(on, { HOME, TMPDIR: '/tmp/', ...env })
   mock.store(on, store)
   const clock = mock.clock(on, { now: NOW })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -378,6 +379,7 @@ function fakeHost(on: On, store: Record<string, unknown> = {}, blitDeny?: string
   on('turn.complete', () => ({ text: 'done' }))
   on('ui.blit', ($, e) => {
     if ('source' in e && 'file' in e.source) blits.push(e.source.file.replace(/^.*\/assets\/cat\//, ''))
+    if ('cells' in e) blits.push('cells')
     return { value: blitDeny === undefined ? {} : { deny: blitDeny } }
   })
   return { toasts, written, spawned, fetched, asked, prompts, blits, clock }
@@ -632,7 +634,7 @@ describe('the mod', () => {
     await ui.unmount()
   })
 
-  test('a terminal without pictures gets a 🐱 and his words, not an empty box', { timeoutMs: 20000 }, async ($, on) => {
+  test('a terminal without pictures gets the pixel-art cat, and he moves there too', { timeoutMs: 20000 }, async ($, on) => {
     const host = fakeHost(on, { progress: { ...emptyProgress(), track: 'beginner' } }, 'the Image draws its alt here: this terminal shows no pictures')
     await $.session.start(start)
     await $.command.run(runQuests())
@@ -640,7 +642,27 @@ describe('the mod', () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     await host.clock.advance(1000)
     expect(await ui.find({ type: 'Image' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /^🐱 “Next up/ })).toBeDefined()
+    const raster = await ui.find({ type: 'Raster' })
+    expect([raster?.props.columns, raster?.props.rows]).toEqual([CAT_COLUMNS, CAT_ROWS])
+    expect(await ui.find({ type: 'Text', text: /^“Next up/ })).toBeDefined()
     await ui.unmount()
+  })
+
+  test('in VS Code the cat is pixel art from the start', { timeoutMs: 20000 }, async ($, on) => {
+    const host = fakeHost(on, { progress: { ...emptyProgress(), track: 'beginner' } }, undefined, { TERM_PROGRAM: 'vscode' })
+    await $.session.start(start)
+    await $.command.run(runQuests())
+    await host.clock.settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Raster' })).toBeDefined()
+    expect(await ui.find({ type: 'Image' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('the pixel cat: every frame fills its cells', () => {
+    for (const frame of ['idle', 'breathe', 'talk1', 'talk2', 'cheer', 'cheer2']) {
+      expect(atob(CAT_CELLS[frame] ?? '').length).toBe(CAT_COLUMNS * CAT_ROWS * 12)
+    }
+    expect(CAT_CELLS.talk2).not.toBe(CAT_CELLS.idle)
   })
 })

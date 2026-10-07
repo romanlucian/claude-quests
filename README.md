@@ -21,9 +21,11 @@ Then type `/quests`.
 
 **🐱 Your quest guide**: a drawn cat in the corner of the pane. He greets you
 with what's waiting (today's page, reviews due, your next quest), cheers when
-you earn XP and tells you when an answer was wrong. In terminals that show
-pictures (Ghostty, kitty) he moves: he breathes, talks and jumps. Elsewhere he
-is a 🐱 with his words. Don't want him? *Me → Cat: on (hide him)*.
+you earn XP and tells you when an answer was wrong. He moves: he breathes,
+his mouth moves while he talks, and he jumps with stars when you level up.
+In VS Code (and any terminal without pictures) he is pixel art drawn in the
+terminal's own characters; in Ghostty and kitty he is the full drawing.
+Don't want him? *Me → Cat: on (hide him)*.
 
 ![How it works: pick your track, do it for real, remember it, level up and show it](docs/how-it-works.png)
 
@@ -120,6 +122,8 @@ you studied, reviews, weak spots fixed and the boss.
 - `hooks/register.tsx` — the mod: the `/quests` command, the hooks that
   watch the session, the pane.
 - `hooks/card.ts` — the shareable cards (level and week), drawn on a canvas.
+- `hooks/cat-pixels.ts` — the pixel-art cat, made by `scripts/cat-pixels.mjs`
+  from `assets/cat/source.png` (`node scripts/cat-pixels.mjs` with Playwright).
 
 Run the tests with `claude plugin test`.
 

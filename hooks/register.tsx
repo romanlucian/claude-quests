@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { QuestBankItem, QuestDaily, QuestPractice, QuestProgress } from '../types'
 import { cardHtml, weekCardHtml } from './card'
+import { CAT_CELLS, CAT_COLUMNS, CAT_ROWS } from './cat-pixels'
 import {
   badgesOf,
   bankItem,
@@ -136,8 +137,9 @@ const view = atom({ plugin: 'quests', key: 'view' } as const, {
 // ---- The cat: your quest guide ------------------------------------------------
 //
 // A drawn cat in the pane's corner that talks: he greets you, cheers when you
-// earn XP and says when an answer was wrong. Where the terminal shows pictures
-// (kitty, Ghostty) he moves: a timer swaps his frames while the pane is open.
+// earn XP and says when an answer was wrong, and moves: a timer swaps his
+// frames while the pane is open. Where the terminal shows pictures (kitty,
+// Ghostty) he is the drawing; elsewhere (VS Code) pixel art in cells.
 
 const CAT_TICK_MS = 160
 const CHEER_MS = 3000
@@ -145,7 +147,7 @@ const CHEER_MS = 3000
 // The cat's clock runs while he is drawn, and stops when he is not.
 let isCatMounted = false
 let isCatRunning = false
-// This terminal shows no pictures (VS Code's, Terminal.app): the cat is a 🐱 then.
+// This terminal shows no pictures (VS Code's, Terminal.app): the cat is pixel art then.
 let isPictureless = false
 let catFrame = ''
 let catTicks = 0
@@ -163,11 +165,13 @@ async function catTick($: Engine): Promise<void> {
   catTicks += 1
   const frame = catFrameAt((await read($, cat)) as CatState, await $.clock.now(), catTicks)
   if (frame === catFrame) return
-  const done = await $.ui.blit({ requestId: PANE, key: 'cat', source: catSource($, frame) })
+  const done = isPictureless
+    ? await $.ui.blit({ requestId: PANE, key: 'cat', cells: CAT_CELLS[frame] ?? CAT_CELLS.idle ?? '' })
+    : await $.ui.blit({ requestId: PANE, key: 'cat', source: catSource($, frame) })
   // Not drawn any more (the pane closed), or this terminal shows no pictures.
   if (done.deny !== undefined) {
     isCatMounted = false
-    if (/\balt\b|placeholder|cannot read/i.test(done.deny)) {
+    if (!isPictureless && /\balt\b|placeholder|cannot read/i.test(done.deny)) {
       isPictureless = true
       $.ui.invalidate('ui.render')
     }
@@ -763,6 +767,8 @@ export const register: Register = on => {
       description: 'Learn Claude Code by doing: quests, daily docs quizzes, reviews, a weekly boss, badges and ranks',
       argumentHint: '[card | week | new]',
     })
+    // VS Code's terminal shows no pictures: the cat starts as pixel art there.
+    if ((await $.env.get('TERM_PROGRAM')) === 'vscode') isPictureless = true
     await loadProgress($)
     await loadNews($)
     await lookAround($)
@@ -837,6 +843,7 @@ export const register: Register = on => {
     const table = $.ui.resolve(e)
     const { Box, Text, Button, Link } = table
     const Image = 'Image' in table ? table.Image : undefined
+    const Raster = 'Raster' in table ? table.Raster : undefined
     const guide = await read($, cat)
     const current = await read($, progress)
     const shown = await read($, view)
@@ -1164,7 +1171,8 @@ export const register: Register = on => {
 
     // The cat, drawn where pictures can be; his timer moves him.
     const now = await $.clock.now()
-    const isCatDrawn = guide.isShown && Image !== undefined && !isPictureless
+    const catKind = !guide.isShown ? 'none' : Image !== undefined && !isPictureless ? 'picture' : Raster !== undefined ? 'pixels' : 'none'
+    const isCatDrawn = catKind !== 'none'
     isCatMounted = isCatDrawn
     catFrame = isCatDrawn ? catFrameAt(guide as CatState, now, catTicks) : ''
     if (isCatDrawn && !isCatRunning) runCat($)
@@ -1178,9 +1186,12 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" gap={1}>
-        {isCatDrawn && Image !== undefined ? (
-          <Box gap={2} alignItems="center">
-            <Image key="cat" source={catSource($, catFrame)} columns={12} rows={6} alt="🐱" />
+        {isCatDrawn ? (
+          <Box gap={2} alignItems="center" flexDirection={e.props.bodyColumns < 70 ? 'column' : 'row'}>
+            {catKind === 'picture' && Image !== undefined && <Image key="cat" source={catSource($, catFrame)} columns={12} rows={6} alt="🐱" />}
+            {catKind === 'pixels' && Raster !== undefined && (
+              <Raster key="cat" columns={CAT_COLUMNS} rows={CAT_ROWS} cells={CAT_CELLS[catFrame] ?? CAT_CELLS.idle ?? ''} />
+            )}
             {header}
           </Box>
         ) : (
