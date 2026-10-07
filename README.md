@@ -4,7 +4,7 @@ A Claude Code mod that turns learning Claude Code into a game. Type `/quests`
 and a pane opens with short missions. You don't read a tutorial: you do the
 thing in your real project, and the quest completes by itself.
 
-![A progress card: level 7, 17 of 23 quests, badges](docs/card-example.png)
+![Quests: a Claude Code mod. The pane shows a Pro daily quiz on worktrees and hooks, a quest done, and a week card](docs/poster.png)
 
 ## Install
 
@@ -18,6 +18,8 @@ In Claude Code:
 Then type `/quests`.
 
 ## What's inside
+
+![How it works: pick your track, do it for real, remember it, level up and show it](docs/how-it-works.png)
 
 **Pick your track**: Beginner, Advanced or Pro. It sets where you start, which
 docs pages your daily quest comes from, and how hard the questions are
@@ -85,6 +87,10 @@ plain words; **I tried it** gives +15 XP.
 with your rank, level, streak and badges; *Download PNG* saves it for X.
 The **Week card** (or `/quests week`) shows your week: XP gained, the pages
 you studied, reviews, weak spots fixed and the boss.
+
+| Level card | Week card |
+| --- | --- |
+| ![Level card: Expert, level 10](docs/card-example.png) | ![Week card: +385 XP, pages studied, reviews, boss](docs/week-example.png) |
 
 ## Good to know
 
