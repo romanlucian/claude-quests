@@ -23,8 +23,9 @@ Then type `/quests`.
 with what's waiting (today's page, reviews due, your next quest), cheers when
 you earn XP and tells you when an answer was wrong. He moves: he breathes,
 his mouth moves while he talks, and he jumps with stars when you level up.
-In VS Code (and any terminal without pictures) he is pixel art drawn in the
-terminal's own characters; in Ghostty and kitty he is the full drawing.
+He is small (as tall as the text beside him) and full body: in VS Code (and
+any terminal without pictures) a hand-drawn 12×12 pixel sprite in the
+terminal's own characters; in Ghostty and kitty the full drawing.
 Don't want him? *Me → Cat: on (hide him)*.
 
 ![How it works: pick your track, do it for real, remember it, level up and show it](docs/how-it-works.png)
@@ -122,13 +123,13 @@ you studied, reviews, weak spots fixed and the boss.
 - `hooks/register.tsx` — the mod: the `/quests` command, the hooks that
   watch the session, the pane.
 - `hooks/card.ts` — the shareable cards (level and week), drawn on a canvas.
-- `hooks/cat-pixels.ts` — the pixel-art cat, made by `scripts/cat-pixels.mjs`
-  from `assets/cat/source.png` (`node scripts/cat-pixels.mjs` with Playwright).
+- `hooks/cat-pixels.ts` — the pixel cat as terminal cells, made by
+  `node scripts/cat-pixels.mjs` from the sprite in `scripts/cat-sprite.mjs`.
 
 Run the tests with `claude plugin test`.
 
 ## License
 
-Code: MIT © 2026 Lucian Roman. The cat drawing (`assets/cat/`, and in
-`docs/`) is Lucian Roman's artwork, all rights reserved: it is not covered by
+Code: MIT © 2026 Lucian Roman. The cat drawing (`assets/cat/`, `scripts/cat-sprite.mjs`,
+and in `docs/`) is Lucian Roman's artwork, all rights reserved: it is not covered by
 the MIT license. Not affiliated with Anthropic.
