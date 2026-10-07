@@ -86,6 +86,14 @@ export type QuestNews = {
   error: string
 }
 
+/** The cat: what he said last, and how (talking or cheering) until when. */
+export type QuestCat = {
+  line: string
+  mood: 'idle' | 'talk' | 'cheer'
+  until: number
+  isShown: boolean
+}
+
 /** What the pane shows. */
 export type QuestView = {
   tab: 'quests' | 'new' | 'me'
@@ -113,6 +121,7 @@ declare module 'claude-code' {
       drill: QuestDaily
       bank: readonly QuestBankItem[]
       practice: QuestPractice
+      cat: QuestCat
       view: QuestView
     }
   }

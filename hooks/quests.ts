@@ -924,3 +924,14 @@ export const PLACEMENT: readonly Question[] = [
 export function placementTrack(right: number): Track {
   return right >= 5 ? 'pro' : right >= 3 ? 'advanced' : 'beginner'
 }
+
+// ---- The cat ------------------------------------------------------------------------
+
+export type CatState = { mood: 'idle' | 'talk' | 'cheer'; until: number }
+
+/** The cat's frame: talking, cheering, or idle with a breath now and then. */
+export function catFrameAt(state: CatState, now: number, tick: number): string {
+  if (now < state.until && state.mood === 'cheer') return Math.floor(tick / 2) % 2 === 0 ? 'cheer' : 'cheer2'
+  if (now < state.until && state.mood === 'talk') return ['talk1', 'talk2', 'talk1', 'idle'][tick % 4] ?? 'idle'
+  return tick % 12 < 2 ? 'breathe' : 'idle'
+}

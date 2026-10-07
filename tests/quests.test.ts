@@ -7,6 +7,7 @@ import {
   badgesOf,
   bankItem,
   bossFor,
+  catFrameAt,
   completedBy,
   dayOf,
   docsPages,
@@ -282,6 +283,12 @@ describe('the course', () => {
     expect(weekLog(now, DAY)).toBe(now.week)
   })
 
+  test('the cat: talks, cheers, and breathes when quiet', () => {
+    expect([0, 1, 2, 3].map(t => catFrameAt({ mood: 'talk', until: 100 }, 50, t))).toEqual(['talk1', 'talk2', 'talk1', 'idle'])
+    expect([0, 2].map(t => catFrameAt({ mood: 'cheer', until: 100 }, 50, t))).toEqual(['cheer', 'cheer2'])
+    expect([0, 1, 2, 11].map(t => catFrameAt({ mood: 'talk', until: 100 }, 200, t))).toEqual(['breathe', 'breathe', 'idle', 'idle'])
+  })
+
   test('the card page carries the numbers', () => {
     const html = cardHtml({ xp: 1200, rank: 'Builder', done: 9, total: 30, daily: 2, tried: 1, mastered: 7, streak: 4, badges: ['first-steps'], date: DAY })
     expect(html).toContain('"level":7')
@@ -325,13 +332,14 @@ const PANE = {
 
 const start = { cwd: '/work', surface: 'terminal', isInteractive: true } as const
 
-function fakeHost(on: On, store: Record<string, unknown> = {}) {
+function fakeHost(on: On, store: Record<string, unknown> = {}, blitDeny?: string) {
   const toasts: string[] = []
   const written: { path: string; text: string }[] = []
   const spawned: string[][] = []
   const fetched: string[] = []
   const asked: string[] = []
   const prompts: string[] = []
+  const blits: string[] = []
   mock.env(on, { HOME, TMPDIR: '/tmp/' })
   mock.store(on, store)
   const clock = mock.clock(on, { now: NOW })
@@ -368,7 +376,11 @@ function fakeHost(on: On, store: Record<string, unknown> = {}) {
     return { value: { isAnswered: true as const, text, usage: {} as never } }
   })
   on('turn.complete', () => ({ text: 'done' }))
-  return { toasts, written, spawned, fetched, asked, prompts, clock }
+  on('ui.blit', ($, e) => {
+    if ('source' in e && 'file' in e.source) blits.push(e.source.file.replace(/^.*\/assets\/cat\//, ''))
+    return { value: blitDeny === undefined ? {} : { deny: blitDeny } }
+  })
+  return { toasts, written, spawned, fetched, asked, prompts, blits, clock }
 }
 
 const runQuests = (args = '') => ({
@@ -433,7 +445,8 @@ describe('the mod', () => {
   })
 
   test('the daily quest at your track\'s level fills your memory bank, and a miss comes back as a review', { timeoutMs: 20000 }, async ($, on) => {
-    const host = fakeHost(on, { progress: { ...emptyProgress(), track: 'pro' } })
+    // The cat stays hidden: this test moves the clock a whole day with the pane open.
+    const host = fakeHost(on, { progress: { ...emptyProgress(), track: 'pro' }, cat: { isShown: false } })
     await $.session.start(start)
     await host.clock.settle()
     await $.command.run(runQuests())
@@ -588,6 +601,46 @@ describe('the mod', () => {
     // The two quests done at start (50 XP) and the Pro daily (50 XP).
     expect(card).toContain('"gained":100')
     expect(card).toMatch(/"topics":\["(Worktrees|Agent SDK overview)"\]/)
+    await ui.unmount()
+  })
+
+  test('the cat greets you, cheers a quest, and moves while the pane is open', { timeoutMs: 20000 }, async ($, on) => {
+    const host = fakeHost(on, { progress: { ...emptyProgress(), track: 'beginner', daily: ['overview', 'checkpointing'] } })
+    on('prompt.submit', ($, e) => ({ text: e.text }))
+    await $.session.start(start)
+    await $.command.run(runQuests())
+    await host.clock.settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Image' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /“Next up: Ask Claude about your project\.”/ })).toBeDefined()
+    await host.clock.advance(1000)
+    expect(host.blits.some(frame => frame.startsWith('talk'))).toBe(true)
+
+    await $.prompt.submit({ text: 'what does this project do?' } as never)
+    expect(await ui.find({ type: 'Text', text: /“Quest done: Ask Claude about your project/ })).toBeDefined()
+    await host.clock.advance(1000)
+    expect(host.blits.some(frame => frame.startsWith('cheer'))).toBe(true)
+
+    // Hidden under Me: no picture, no more frames.
+    await ui.press({ key: 'tab-me' })
+    await ui.press({ key: 'cat-toggle' })
+    expect(await ui.find({ type: 'Image' })).toBeUndefined()
+    await host.clock.advance(1000)
+    const count = host.blits.length
+    await host.clock.advance(1000)
+    expect(host.blits.length).toBe(count)
+    await ui.unmount()
+  })
+
+  test('a terminal without pictures gets a 🐱 and his words, not an empty box', { timeoutMs: 20000 }, async ($, on) => {
+    const host = fakeHost(on, { progress: { ...emptyProgress(), track: 'beginner' } }, 'the Image draws its alt here: this terminal shows no pictures')
+    await $.session.start(start)
+    await $.command.run(runQuests())
+    await host.clock.settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await host.clock.advance(1000)
+    expect(await ui.find({ type: 'Image' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^🐱 “Next up/ })).toBeDefined()
     await ui.unmount()
   })
 })

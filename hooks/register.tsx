@@ -7,6 +7,7 @@ import {
   badgesOf,
   bankItem,
   bossFor,
+  catFrameAt,
   completedBy,
   dayOf,
   docsPages,
@@ -47,7 +48,7 @@ import {
   TRACKS,
   WHATS_NEW_URL,
 } from './quests'
-import type { DocsPage, Event, Question, Quest, QuestLevel, Track } from './quests'
+import type { CatState, DocsPage, Event, Question, Quest, QuestLevel, Track } from './quests'
 
 type Engine = EngineInterface
 
@@ -119,6 +120,7 @@ const daily = atom({ plugin: 'quests', key: 'daily' } as const, EMPTY_DAILY)
 const drill = atom({ plugin: 'quests', key: 'drill' } as const, EMPTY_DAILY)
 const bank = atom({ plugin: 'quests', key: 'bank' } as const, NO_ITEMS)
 const practice = atom({ plugin: 'quests', key: 'practice' } as const, EMPTY_PRACTICE)
+const cat = atom({ plugin: 'quests', key: 'cat' } as const, { line: '', mood: 'idle', until: 0, isShown: true })
 const view = atom({ plugin: 'quests', key: 'view' } as const, {
   tab: 'quests',
   focus: '',
@@ -130,6 +132,79 @@ const view = atom({ plugin: 'quests', key: 'view' } as const, {
   testRight: 0,
   testNote: '',
 })
+
+// ---- The cat: your quest guide ------------------------------------------------
+//
+// A drawn cat in the pane's corner that talks: he greets you, cheers when you
+// earn XP and says when an answer was wrong. Where the terminal shows pictures
+// (kitty, Ghostty) he moves: a timer swaps his frames while the pane is open.
+
+const CAT_TICK_MS = 160
+const CHEER_MS = 3000
+
+// The cat's clock runs while he is drawn, and stops when he is not.
+let isCatMounted = false
+let isCatRunning = false
+// This terminal shows no pictures (VS Code's, Terminal.app): the cat is a 🐱 then.
+let isPictureless = false
+let catFrame = ''
+let catTicks = 0
+
+const catSource = ($: Engine, frame: string) => ({ file: `${$.plugin.root}/assets/cat/${frame}.png`, format: 'png' as const })
+
+async function say($: Engine, line: string, mood: 'talk' | 'cheer' = 'talk'): Promise<void> {
+  const now = await $.clock.now()
+  const until = now + (mood === 'cheer' ? CHEER_MS : Math.min(4000, 900 + line.length * 45))
+  await update($, cat, value => ({ ...value, line, mood, until }))
+}
+
+async function catTick($: Engine): Promise<void> {
+  if (!isCatMounted) return
+  catTicks += 1
+  const frame = catFrameAt((await read($, cat)) as CatState, await $.clock.now(), catTicks)
+  if (frame === catFrame) return
+  const done = await $.ui.blit({ requestId: PANE, key: 'cat', source: catSource($, frame) })
+  // Not drawn any more (the pane closed), or this terminal shows no pictures.
+  if (done.deny !== undefined) {
+    isCatMounted = false
+    if (/\balt\b|placeholder|cannot read/i.test(done.deny)) {
+      isPictureless = true
+      $.ui.invalidate('ui.render')
+    }
+  } else catFrame = frame
+}
+
+// The cat's clock: one tick, then the next, until he is not drawn any more.
+function runCat($: Engine): void {
+  isCatRunning = isCatMounted
+  if (!isCatMounted) return
+  $.clock.after(CAT_TICK_MS, () => {
+    void catTick($)
+      .catch(() => {
+        isCatMounted = false
+      })
+      .finally(() => runCat($))
+  })
+}
+
+// What the cat says when you open the pane: what is waiting for you.
+async function greet($: Engine): Promise<void> {
+  const current = await read($, progress)
+  const todays = await read($, daily)
+  const due = dueToday(await read($, bank), await today($), REVIEWS_A_DAY).length
+  const next = nextQuest(current)
+  const line =
+    current.track === ''
+      ? "Hi! I'm your quest guide. Pick a track, or take the test."
+      : todays.path !== '' && todays.status !== 'done' && !current.daily.includes(todays.path)
+        ? `Today's page: ${todays.title}. Ready when you are!`
+        : due > 0
+          ? `${due} ${due === 1 ? 'question' : 'questions'} to review today. Keep them fresh!`
+          : next !== undefined
+            ? `Next up: ${next.title}.`
+            : 'Every quest done! See you at the daily.'
+  await say($, line)
+}
 
 async function today($: Engine): Promise<string> {
   return dayOf(await $.clock.now())
@@ -165,6 +240,8 @@ async function loadProgress($: Engine): Promise<void> {
   await update($, bank, () => (Array.isArray(items) ? items : NO_ITEMS))
   const saw = (await $.store.get('practice')) as QuestPractice | undefined
   if (saw !== undefined && typeof saw === 'object') await update($, practice, () => ({ ...EMPTY_PRACTICE, ...saw }))
+  const catSaved = (await $.store.get('cat')) as { isShown?: unknown } | undefined
+  if (catSaved?.isShown === false) await update($, cat, value => ({ ...value, isShown: false }))
   const drilled = (await $.store.get('drill')) as QuestDaily | undefined
   if (drilled !== undefined && drilled.day === (await today($))) await update($, drill, () => ({ ...EMPTY_DAILY, ...drilled, status: drilled.status === 'loading' ? ('idle' as const) : drilled.status }))
 }
@@ -232,6 +309,7 @@ async function award($: Engine, change: (current: QuestProgress) => QuestProgres
   for (const badge of newBadges) text += ` · Badge: ${badge.name} ★`
   $.ui.toast(text)
   $.ui.log(`quests: ${text}`, { to: 'debug' })
+  await say($, text.replace(/^\S+\s/, ''), 'cheer')
 }
 
 async function complete($: Engine, quest: Quest, how: string): Promise<void> {
@@ -293,10 +371,12 @@ async function answerQuest($: Engine, quest: Quest, option: number): Promise<voi
   if (question === undefined) return
   if (option !== question.answer) {
     await update($, view, value => ({ ...value, note: 'Not quite. The docs page has the answer: try again.' }))
+    await say($, 'Not quite. The docs page has it!')
     return
   }
   if (step + 1 < (quest.quiz?.length ?? 0)) {
     await update($, view, value => ({ ...value, step: step + 1, note: 'Right!' }))
+    await say($, 'Right! Next one.')
     return
   }
   const before = await read($, progress)
@@ -397,10 +477,12 @@ async function answerQuiz($: Engine, which: Quiz, option: number): Promise<void>
   if (option !== question.answer) {
     const misses = current.misses.includes(current.step) ? current.misses : [...current.misses, current.step]
     await setQuiz($, which, value => ({ ...value, misses, note: 'Not quite. The page has it: open it and try again.' }))
+    await say($, 'Not quite. Open the page: the answer is there.')
     return
   }
   if (current.step + 1 < current.questions.length) {
     await setQuiz($, which, value => ({ ...value, step: value.step + 1, note: 'Right!' }))
+    await say($, 'Right!')
     return
   }
   const done: QuestDaily = { ...current, status: 'done', note: '' }
@@ -441,6 +523,7 @@ async function startDrill($: Engine): Promise<void> {
   if (current.day === day && current.status !== 'idle' && current.status !== 'error') return
   const spot = weakSpots(await read($, bank))[0]
   if (spot === undefined) return
+  await say($, `New questions on ${spot.title}. You can fix this!`)
   const fresh: QuestDaily = { ...EMPTY_DAILY, day, path: spot.path, title: spot.title, url: spot.url, track: trackOf(await read($, progress)) }
   await update($, drill, () => fresh)
   await startQuiz($, 'drill')
@@ -465,6 +548,7 @@ async function answerTest($: Engine, option: number): Promise<void> {
     testRight: 0,
     testNote: `You got ${right}/${PLACEMENT.length}: ${TRACKS[track].name} suits you. Change it any time under Me.`,
   }))
+  await say($, `${right}/${PLACEMENT.length}! ${TRACKS[track].name} it is.`, 'cheer')
 }
 
 // ---- Review and the weekly boss -------------------------------------------------
@@ -497,6 +581,7 @@ async function answerReview($: Engine, option: number): Promise<void> {
     note: isRight ? `Right! Back in ${INTERVALS[next.box]} days.` : `The answer: ${item.options[item.answer]}. It comes back tomorrow.`,
   }))
   if (isRight) await award($, p => ({ ...p, reviews: p.reviews + 1 }), `🔁 Remembered (+${REVIEW_XP} XP)`, { isReview: true })
+  else await say($, 'That one slipped. It comes back tomorrow!')
 }
 
 async function startBoss($: Engine): Promise<void> {
@@ -518,6 +603,7 @@ async function answerBoss($: Engine, option: number): Promise<void> {
   const mistakes = state.bossMistakes + (isRight ? 0 : 1)
   if (mistakes > BOSS_MISTAKES) {
     await setPractice($, p => ({ ...p, boss: 'lost' as const, bossMistakes: mistakes, bossTriedOn: day, bossNote: `The answer: ${item.options[item.answer]}. Two mistakes: the boss wins today. Try again tomorrow.` }))
+    await say($, 'The boss won today. Rematch tomorrow!')
     return
   }
   if (state.bossStep + 1 < state.bossIds.length) {
@@ -700,6 +786,7 @@ export const register: Register = on => {
     void refreshNews($, false)
     void prepareDaily($)
     await practiceToday($)
+    await greet($)
     const current = await read($, progress)
     const { level } = levelOf(xpOf(current))
     return { text: `${rankOf(level)} · Level ${level} · ${current.done.length}/${QUESTS.length} quests. The Quests pane is open.` }
@@ -747,7 +834,10 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const table = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = table
+    const Image = 'Image' in table ? table.Image : undefined
+    const guide = await read($, cat)
     const current = await read($, progress)
     const shown = await read($, view)
     const latest = await read($, news)
@@ -1030,6 +1120,13 @@ export const register: Register = on => {
             <Text bold>{`Track: ${isTrack(current.track) ? TRACKS[current.track].name : 'not chosen'}`}</Text>
             {trackButtons}
             <Button key="test-retake" label="Take the placement test" onPress={() => void startTest()} />
+            <Button
+              key="cat-toggle"
+              label={guide.isShown ? 'Cat: on (hide him)' : 'Cat: off (show him)'}
+              onPress={() =>
+                void update($, cat, value => ({ ...value, isShown: !value.isShown })).then(next => $.store.set('cat', { isShown: next.isShown }))
+              }
+            />
           </Box>
           <Box flexDirection="column">
             <Text bold>This week</Text>
@@ -1065,12 +1162,30 @@ export const register: Register = on => {
       )
     }
 
+    // The cat, drawn where pictures can be; his timer moves him.
+    const now = await $.clock.now()
+    const isCatDrawn = guide.isShown && Image !== undefined && !isPictureless
+    isCatMounted = isCatDrawn
+    catFrame = isCatDrawn ? catFrameAt(guide as CatState, now, catTicks) : ''
+    if (isCatDrawn && !isCatRunning) runCat($)
+    const header = (
+      <Box flexDirection="column">
+        {guide.isShown && guide.line !== '' && <Text color="warning" bold>{`${isCatDrawn ? '' : '🐱 '}“${guide.line}”`}</Text>}
+        <Text bold>{`${rank} · Level ${level} · ${xp} XP${streak > 0 ? ` · 🔥 ${streak}-day streak` : ''} · ${earned.length} badges`}</Text>
+        <Text color="warning">{`${bar} ${size - into} XP to level ${level + 1}`}</Text>
+      </Box>
+    )
+
     return (
       <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text bold>{`${rank} · Level ${level} · ${xp} XP${streak > 0 ? ` · 🔥 ${streak}-day streak` : ''} · ${earned.length} badges`}</Text>
-          <Text color="warning">{`${bar} ${size - into} XP to level ${level + 1}`}</Text>
-        </Box>
+        {isCatDrawn && Image !== undefined ? (
+          <Box gap={2} alignItems="center">
+            <Image key="cat" source={catSource($, catFrame)} columns={12} rows={6} alt="🐱" />
+            {header}
+          </Box>
+        ) : (
+          header
+        )}
         {tabs}
         {body}
       </Box>

@@ -19,6 +19,12 @@ Then type `/quests`.
 
 ## What's inside
 
+**🐱 Your quest guide**: a drawn cat in the corner of the pane. He greets you
+with what's waiting (today's page, reviews due, your next quest), cheers when
+you earn XP and tells you when an answer was wrong. In terminals that show
+pictures (Ghostty, kitty) he moves: he breathes, talks and jumps. Elsewhere he
+is a 🐱 with his words. Don't want him? *Me → Cat: on (hide him)*.
+
 ![How it works: pick your track, do it for real, remember it, level up and show it](docs/how-it-works.png)
 
 **Pick your track**: Beginner, Advanced or Pro. It sets where you start, which
@@ -104,6 +110,8 @@ you studied, reviews, weak spots fixed and the boss.
   code.claude.com. Nothing about you is sent anywhere.
 - Claude Code changes fast. The quests are short and link the docs, which
   are always the source of truth.
+- The cat moves only while the pane is open (a frame swap every 160 ms);
+  closed, his clock stops.
 
 ## How it works
 
@@ -117,4 +125,6 @@ Run the tests with `claude plugin test`.
 
 ## License
 
-MIT © 2026 Lucian Roman. Not affiliated with Anthropic.
+Code: MIT © 2026 Lucian Roman. The cat drawing (`assets/cat/`, and in
+`docs/`) is Lucian Roman's artwork, all rights reserved: it is not covered by
+the MIT license. Not affiliated with Anthropic.
