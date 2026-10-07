@@ -65,6 +65,7 @@ async function award($: Engine, change: (current: QuestProgress) => QuestProgres
   if (levelAfter > levelBefore) text += ` · Level ${levelAfter}!`
   for (const badge of newBadges) text += ` · Badge: ${badge.name} ★`
   $.ui.toast(text)
+  $.ui.log(`quests: ${text}`, { to: 'debug' })
 }
 
 async function complete($: Engine, quest: Quest, how: string): Promise<void> {
@@ -155,13 +156,14 @@ async function explain($: Engine, key: string): Promise<void> {
   try {
     const answer = await $.model.complete({
       model: 'haiku',
-      maxTokens: 220,
+      maxTokens: 160,
       system:
-        'You explain one line of the Claude Code changelog to a Claude Code user. Two short plain sentences: what it is and why it helps. ' +
-        'Then a line starting "Try it:" with one concrete step. No markdown, no headings. If the line is too technical to try, say who it helps instead.',
+        'You explain one line of the Claude Code changelog to a Claude Code user, in at most 40 words. ' +
+        'One plain sentence: what it is and why it helps. Then a line starting "Try it:" with one concrete step. ' +
+        'No markdown, no backticks, no headings. If it is not something a user tries (an API for mod or script authors), say who it helps instead of "Try it:".',
       prompt: `Claude Code ${feature.version}: ${feature.text}`,
     })
-    text = answer.isAnswered ? answer.text.trim() : `Could not explain it now (${answer.reason}).`
+    text = answer.isAnswered ? answer.text.replace(/`/g, '').trim() : `Could not explain it now (${answer.reason}).`
   } catch (error) {
     text = `Could not explain it now (${error instanceof Error ? error.message : String(error)}).`
   }
@@ -276,7 +278,8 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    await saw($, { kind: 'tool', tool: String(e.tool) })
+    // Only a tool that ran counts: not one the permission check refused.
+    if (result.deny === undefined) await saw($, { kind: 'tool', tool: String(e.tool) })
     return result
   }).catch(($, e, next) => next(e))
   on('agent.spawn', async ($, e, next) => {

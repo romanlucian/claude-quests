@@ -181,4 +181,12 @@ describe('the mod', () => {
     expect(titles).toContain('Point at a file with @')
     expect(titles).toContain('Let Claude explore your code')
   })
+
+  test('a tool the permission check refused completes nothing', { timeoutMs: 20000 }, async ($, on) => {
+    const host = fakeHost(on)
+    on('tool.call', () => ({ deny: 'WebSearch was not allowed' }))
+    await $.session.start(start)
+    await $.tool.call({ tool: 'WebSearch', input: { query: 'claude code docs' } } as never)
+    expect(host.toasts.some(t => t.includes('Let Claude look something up'))).toBe(false)
+  })
 })
