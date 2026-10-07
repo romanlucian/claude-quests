@@ -22,6 +22,8 @@ Then type `/quests`.
 **Pick your track**: Beginner, Advanced or Pro. It sets where you start, which
 docs pages your daily quest comes from, and how hard the questions are
 (Pro: real scenarios, limits and edge cases, 4 options). Change it any time.
+Not sure? A **6-question placement test** suggests one (with a "Not sure"
+option, so nobody guesses their way into Pro).
 
 **30 quests in 6 levels**, each linked to its page in the
 [official docs](https://code.claude.com/docs):
@@ -45,13 +47,20 @@ quiz instead, one question at a time. Every quest also has "I did it".
 track that you haven't done (about 95 learning pages). When you press
 *Start*, Claude Haiku reads the page and writes questions from it, with only
 facts from that page, at your track's level; answers are shuffled. +25,
-+35 or +50 XP.
++35 or +50 XP. On the **Pro** track, a page you studied before joins
+today's, and some questions need both: how two features work together
+(for example, where a hook runs once Claude is inside a worktree).
 
 **🔁 Your memory bank: spaced review**. Every daily question is saved. A
 question you get right comes back after 3, 7, 14, 30, 60 and 120 days; a
 miss comes back tomorrow. Up to 5 reviews a day, +5 XP each. At the 30-day
 step a question counts as *mastered*. This is what makes it still worth
 opening after six months: you keep what you learned.
+
+**🎯 Weak spots**: a page you missed 2 questions on or more becomes a weak
+spot. *Practise it* asks Claude Haiku for **new** questions on that page
+(never the ones you already have). At most one miss and the weak spot is
+fixed. Once a day, +20 XP.
 
 **⚔️ A weekly boss**: once your bank has questions from 3 pages, every week
 brings a boss: 5 questions from different pages, one mistake allowed. Lose,
@@ -61,10 +70,10 @@ and try again the next day. +100 XP.
 Levels get longer as you go (level 2 in a day, level 20 in months), with a
 rank: Apprentice, Builder (5), Expert (10), Master (20), Legend (35).
 
-**16 badges**, from your first day to half a year: one per level, Scholar,
+**17 badges**, from your first day to half a year: one per level, Scholar,
 Early Adopter, Reader (5 daily) and Bookworm (50), On Fire (7-day streak)
 and Unstoppable (30), Sharp Memory (10 mastered) and Elephant (100), Boss
-Slayer and Boss Hunter (10 bosses). The **Me** tab shows each one's progress.
+Slayer and Boss Hunter (10 bosses), Comeback (3 weak spots fixed). The **Me** tab shows each one's progress.
 
 **⭐ New**: features from the official
 [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md),
@@ -74,13 +83,16 @@ plain words; **I tried it** gives +15 XP.
 
 **Share card**: the *Share card* button (or `/quests card`) opens your card,
 with your rank, level, streak and badges; *Download PNG* saves it for X.
+The **Week card** (or `/quests week`) shows your week: XP gained, the pages
+you studied, reviews, weak spots fixed and the boss.
 
 ## Good to know
 
 - Progress is kept on your computer (the mod's own store), across sessions.
 - Only two things use your Claude usage, and only when you press them:
   *Explain* (one small Haiku call per line, kept so it never asks twice) and
-  *Start today's quiz* (one Haiku call a day that reads one docs page).
+  *Start today's quiz* (one Haiku call a day that reads one docs page, two
+  on Pro) and *Practise it* (at most one a day).
   Reviews and the weekly boss reuse your saved questions: no Claude calls.
 - The mod reads only public pages: the changelog on GitHub and the docs at
   code.claude.com. Nothing about you is sent anywhere.
@@ -93,7 +105,7 @@ with your rank, level, streak and badges; *Download PNG* saves it for X.
   reading new features from the changelog. Plain data, tested on its own.
 - `hooks/register.tsx` — the mod: the `/quests` command, the hooks that
   watch the session, the pane.
-- `hooks/card.ts` — the shareable card, drawn on a canvas.
+- `hooks/card.ts` — the shareable cards (level and week), drawn on a canvas.
 
 Run the tests with `claude plugin test`.
 

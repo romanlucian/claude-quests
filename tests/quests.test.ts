@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { cardHtml } from '../hooks/card'
+import { cardHtml, weekCardHtml } from '../hooks/card'
 import {
   addDays,
   badgesOf,
@@ -12,6 +12,7 @@ import {
   docsPages,
   dueToday,
   emptyProgress,
+  forgive,
   isAtLeast,
   isUserFacing,
   levelOf,
@@ -20,15 +21,21 @@ import {
   nextQuest,
   parseQuiz,
   pickDaily,
+  pickPartner,
+  placementTrack,
   quizSystem,
   rankOf,
   schedule,
   streakOn,
   trackOfPage,
+  weakSpots,
+  weekLog,
   weekOf,
   withStreak,
   xpOf,
   BADGES,
+  NOT_SURE,
+  PLACEMENT,
   QUESTS,
 } from '../hooks/quests'
 import type { BankItem } from '../hooks/quests'
@@ -227,12 +234,78 @@ describe('the course', () => {
     expect(parseQuiz('no json')).toBeUndefined()
   })
 
+  test('weak spots: pages with 2 misses or more, the most missed first, forgiven once fixed', () => {
+    let a = item(1, 'a')
+    a = schedule(schedule(a, false, DAY), false, DAY)
+    expect(a.misses).toBe(2)
+    const b = { ...item(2, 'b'), misses: 1 }
+    const c = { ...item(3, 'c'), misses: 3 }
+    const bank = [a, b, c, { ...item(4, 'b'), misses: 2 }]
+    expect(weakSpots(bank).map(spot => [spot.path, spot.misses])).toEqual([['b', 3], ['c', 3], ['a', 2]])
+    expect(weakSpots(forgive(bank, 'b')).map(spot => spot.path)).toEqual(['c', 'a'])
+    expect(weakSpots([item(5, 'd')])).toEqual([])
+  })
+
+  test('the placement test: 6 questions, "Not sure" never right, a track by score', () => {
+    expect(PLACEMENT).toHaveLength(6)
+    for (const q of PLACEMENT) {
+      expect(q.options[q.options.length - 1]).toBe(NOT_SURE)
+      expect(q.options[q.answer]).not.toBe(NOT_SURE)
+    }
+    expect(PLACEMENT.map(q => q.options[q.answer])).toEqual([
+      'Plan mode (Shift+Tab)',
+      'CLAUDE.md',
+      '.claude/agents/',
+      '.mcp.json',
+      'PreToolUse',
+      'claude --worktree <name>',
+    ])
+    // The right answer is not always first.
+    expect(new Set(PLACEMENT.map(q => q.answer)).size).toBeGreaterThan(1)
+    expect([0, 2, 3, 4, 5, 6].map(placementTrack)).toEqual(['beginner', 'beginner', 'advanced', 'advanced', 'pro', 'pro'])
+  })
+
+  test('Pro pairs today\'s page with one studied before; quiz kinds', () => {
+    const pages = docsPages(DOCS_INDEX)
+    expect(pickPartner(pages, [], DAY, 'worktrees')).toBeUndefined()
+    expect(pickPartner(pages, ['worktrees'], DAY, 'worktrees')).toBeUndefined()
+    expect(pickPartner(pages, ['worktrees', 'hooks-guide'], DAY, 'worktrees')?.path).toBe('hooks-guide')
+    expect(quizSystem('pro', 'two')).toContain('two pages')
+    expect(quizSystem('advanced', 'weak')).toContain('never repeating')
+    expect(quizSystem('pro')).not.toContain('two pages')
+  })
+
+  test('the week log starts fresh each week, from the XP you had', () => {
+    const p = { ...emptyProgress(), daily: ['a', 'b'], week: { id: '2026-W40', xpStart: 0, topics: ['Old'], reviews: 4, fixed: 1 } }
+    expect(weekLog(p, DAY)).toEqual({ id: '2026-W41', xpStart: 50, topics: [], reviews: 0, fixed: 0 })
+    const now = { ...p, week: { id: '2026-W41', xpStart: 10, topics: ['Hooks'], reviews: 2, fixed: 0 } }
+    expect(weekLog(now, DAY)).toBe(now.week)
+  })
+
   test('the card page carries the numbers', () => {
     const html = cardHtml({ xp: 1200, rank: 'Builder', done: 9, total: 30, daily: 2, tried: 1, mastered: 7, streak: 4, badges: ['first-steps'], date: DAY })
     expect(html).toContain('"level":7')
     expect(html).toContain('"rank":"Builder"')
     expect(html).toContain('"mastered":7')
     expect(html).toContain('Download PNG')
+    const week = weekCardHtml({
+      week: '2026-W41',
+      gained: 340,
+      level: 10,
+      rank: 'Expert',
+      topics: ['Hooks guide', '</script><b>x'],
+      reviews: 18,
+      fixed: 1,
+      isBossBeaten: true,
+      streak: 12,
+      mastered: 24,
+      date: DAY,
+    })
+    expect(week).toContain('"gained":340')
+    expect(week).toContain('"weekNumber":41')
+    expect(week).toContain('MY WEEK')
+    expect(week).not.toContain('</script><b>')
+    expect(week).toContain('claude-code-week-41.png')
   })
 })
 
@@ -258,6 +331,7 @@ function fakeHost(on: On, store: Record<string, unknown> = {}) {
   const spawned: string[][] = []
   const fetched: string[] = []
   const asked: string[] = []
+  const prompts: string[] = []
   mock.env(on, { HOME, TMPDIR: '/tmp/' })
   mock.store(on, store)
   const clock = mock.clock(on, { now: NOW })
@@ -287,12 +361,14 @@ function fakeHost(on: On, store: Record<string, unknown> = {}) {
   })
   on('model.complete', ($, e) => {
     const system = typeof e.system === 'string' ? e.system : ''
-    asked.push(system.includes('quiz') ? `quiz:${system.includes('exactly 4') ? 4 : 3}` : 'explain')
+    const kind = system.includes('two pages') ? ':two' : system.includes('keeps getting') ? ':weak' : ''
+    asked.push(system.includes('quiz') ? `quiz:${system.includes('exactly 4') ? 4 : 3}${kind}` : 'explain')
+    prompts.push(String(e.prompt))
     const text = system.includes('quiz') ? QUIZ : 'It is a faster model. Try it: run /model.'
     return { value: { isAnswered: true as const, text, usage: {} as never } }
   })
   on('turn.complete', () => ({ text: 'done' }))
-  return { toasts, written, spawned, fetched, asked, clock }
+  return { toasts, written, spawned, fetched, asked, prompts, clock }
 }
 
 const runQuests = (args = '') => ({
@@ -435,5 +511,83 @@ describe('the mod', () => {
     await $.session.start(start)
     await $.tool.call({ tool: 'WebSearch', input: { query: 'claude code docs' } } as never)
     expect(host.toasts.some(t => t.includes('Let Claude look something up'))).toBe(false)
+  })
+
+  test('the placement test picks your track', { timeoutMs: 20000 }, async ($, on) => {
+    const host = fakeHost(on)
+    await $.session.start(start)
+    await $.command.run(runQuests())
+    await host.clock.settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'test-start' })
+    expect(await ui.find({ type: 'Text', text: 'Placement test' })).toBeDefined()
+    // Four right, two "Not sure": Advanced.
+    for (const [i, q] of PLACEMENT.entries()) {
+      const option = i < 4 ? q.answer : q.options.indexOf(NOT_SURE)
+      await ui.press({ key: `t-${i}-${option}` })
+    }
+    expect(await ui.find({ type: 'Text', text: /You got 4\/6: Advanced suits you/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Placement test' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /Next quest · Hand a big job to a subagent/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a weak spot: new questions on the page you miss most; done well, it is fixed', { timeoutMs: 20000 }, async ($, on) => {
+    const later = '2026-12-01'
+    const bank = [
+      { ...item(1, 'checkpointing', 0, later), misses: 2, title: 'Checkpointing', url: 'https://code.claude.com/docs/en/checkpointing' },
+      { ...item(2, 'hooks-guide', 3, later), misses: 0 },
+    ]
+    const host = fakeHost(on, { bank, progress: { ...emptyProgress(), track: 'advanced', fixed: 2 } })
+    await $.session.start(start)
+    await $.command.run(runQuests())
+    await host.clock.settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /🎯 Weak spot · Checkpointing · missed 2 times/ })).toBeDefined()
+    await ui.press({ key: 'drill-start' })
+    expect(host.asked).toEqual(['quiz:3:weak'])
+    expect(host.prompts[0]).toContain('do not repeat')
+    expect(host.prompts[0]).toContain('- Question 1?')
+    const pick = async (label: string) => {
+      const button = (await ui.findAll({ type: 'Button' })).find(b => String(b.props.key).startsWith('w-') && String(b.props.label).endsWith(`) ${label}`))
+      await ui.press({ key: String(button?.key) })
+    }
+    await pick('Esc twice')
+    await pick('/rewind')
+    await pick('No')
+    expect(host.toasts.some(t => t.startsWith('🎯 Weak spot fixed: Checkpointing (+20 XP)') && t.includes('Badge: Comeback'))).toBe(true)
+    expect(await ui.find({ type: 'Text', text: /practised today/ })).toBeDefined()
+    await ui.press({ key: 'tab-me' })
+    expect(await ui.find({ type: 'Text', text: /1 weak spots fixed/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Weak spots · 0' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('Pro: two pages a day; the week card', { timeoutMs: 20000 }, async ($, on) => {
+    const progress = { ...emptyProgress(), track: 'pro', daily: ['hooks-guide'] }
+    const host = fakeHost(on, { progress })
+    await $.session.start(start)
+    await $.command.run(runQuests())
+    await host.clock.settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /📅 Daily · (Worktrees|Agent SDK overview) \+ Hooks guide · Pro/ })).toBeDefined()
+    await ui.press({ key: 'daily-start' })
+    expect(host.asked).toEqual(['quiz:4:two'])
+    expect(host.fetched.filter(url => url.endsWith('hooks-guide.md'))).toHaveLength(1)
+    expect(host.prompts[0]?.split('Page: ')).toHaveLength(3)
+    const pick = async (label: string) => {
+      const button = (await ui.findAll({ type: 'Button' })).find(b => String(b.props.key).startsWith('d-') && String(b.props.label).endsWith(`) ${label}`))
+      await ui.press({ key: String(button?.key) })
+    }
+    await pick('Esc twice')
+    await pick('/rewind')
+    await pick('No')
+
+    expect((await $.command.run(runQuests('week'))).text).toContain('week card')
+    const card = host.written.find(w => w.path.endsWith('claude-quests-week.html'))?.text ?? ''
+    // The two quests done at start (50 XP) and the Pro daily (50 XP).
+    expect(card).toContain('"gained":100')
+    expect(card).toMatch(/"topics":\["(Worktrees|Agent SDK overview)"\]/)
+    await ui.unmount()
   })
 })

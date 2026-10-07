@@ -437,6 +437,7 @@ export const BADGES: readonly (Badge & { goal: number; count: (p: Progress) => n
   { id: 'elephant', name: 'Elephant', why: '100 questions mastered', goal: 100, count: p => p.mastered },
   { id: 'boss-slayer', name: 'Boss Slayer', why: 'Beat a weekly boss', goal: 1, count: p => p.bosses },
   { id: 'boss-hunter', name: 'Boss Hunter', why: 'Beat 10 weekly bosses', goal: 10, count: p => p.bosses },
+  { id: 'comeback', name: 'Comeback', why: 'Fixed 3 weak spots', goal: 3, count: p => p.fixed ?? 0 },
 ]
 
 /**
@@ -459,9 +460,25 @@ export type Progress = {
   /** Weekly bosses beaten, and review answers right. */
   bosses: number
   reviews: number
-  /** XP beyond the counted things: the harder tracks' daily extra. */
+  /** XP beyond the counted things: the harder tracks' daily extra, weak-spot practice. */
   bonus?: number
+  /** Weak spots fixed: pages you kept missing, then practised well. */
+  fixed?: number
+  /** This week so far, for the week card. */
+  week?: WeekLog
 }
+
+/** What you did this ISO week: the XP you had when it began, the pages you studied, reviews right. */
+export type WeekLog = { id: string; xpStart: number; topics: readonly string[]; reviews: number; fixed: number }
+
+/** This week's log: the one kept, or a fresh one when the week changed. */
+export function weekLog(progress: Progress, day: string): WeekLog {
+  const id = weekOf(day)
+  return progress.week?.id === id ? progress.week : { id, xpStart: xpOf(progress), topics: [], reviews: 0, fixed: 0 }
+}
+
+/** XP for practising a weak spot, once a day. */
+export const DRILL_XP = 20
 
 export const emptyProgress = (): Progress => ({
   done: [],
@@ -706,6 +723,13 @@ export function pickDaily(pages: readonly DocsPage[], done: readonly string[], d
 
 export type DailyQuiz = { summary: string; questions: Question[] }
 
+/** A question with its options in a fixed, mixed order. */
+export function shuffled(question: Question): Question {
+  const right = question.options[question.answer] as string
+  const options = [...question.options].sort((a, b) => hash(question.ask + a).localeCompare(hash(question.ask + b)))
+  return { ask: question.ask, options, answer: options.indexOf(right) }
+}
+
 /** The quiz Claude wrote for a page, checked: 3 questions of 3 options each. */
 export function parseQuiz(text: string): DailyQuiz | undefined {
   const json = /\{[\s\S]*\}/.exec(text)?.[0]
@@ -719,9 +743,7 @@ export function parseQuiz(text: string): DailyQuiz | undefined {
       const options = q.options.filter((o): o is string => typeof o === 'string')
       if (options.length < 2 || options.length > 5 || options.length !== q.options.length || q.answer < 0 || q.answer >= options.length) return undefined
       // Claude tends to put the right answer first: shuffle, the same way each time.
-      const right = options[q.answer] as string
-      const shuffled = [...options].sort((a, b) => hash(q.ask + a).localeCompare(hash(q.ask + b)))
-      questions.push({ ask: q.ask, options: shuffled, answer: shuffled.indexOf(right) })
+      questions.push(shuffled({ ask: q.ask, options, answer: q.answer }))
     }
     if (questions.length === 0) return undefined
     return { summary: data.summary, questions: questions.slice(0, 4) }
@@ -730,9 +752,19 @@ export function parseQuiz(text: string): DailyQuiz | undefined {
   }
 }
 
-/** How Claude is asked to write the daily quiz, from the page's own text only, at your track's level. */
-export function quizSystem(track: Track): string {
+/**
+ * How Claude is asked to write a quiz, from the pages' own text only, at your
+ * track's level: on one page, on two (Pro: how features combine), or new
+ * questions on a weak spot.
+ */
+export function quizSystem(track: Track, kind: 'one' | 'two' | 'weak' = 'one'): string {
   const { questions, options } = TRACKS[track]
+  const extra =
+    kind === 'two'
+      ? 'You get two pages. At least one question must need both: how the two features work together, as the pages state it. '
+      : kind === 'weak'
+        ? 'The reader keeps getting this page wrong: ask about its most important practical points, from new angles, never repeating the questions listed after the page. '
+        : ''
   const level =
     track === 'beginner'
       ? 'The reader is new to Claude Code: ask what a feature is for, when to use it, and the basic command or key.'
@@ -743,6 +775,7 @@ export function quizSystem(track: Track): string {
   return (
     'You write a short quiz about one page of the official Claude Code docs. ' +
     `${level} ` +
+    extra +
     'Use only facts stated in the page text you are given; never add facts from elsewhere. ' +
     'Answer with JSON only: {"summary": "<one plain sentence, at most 30 words: what the page teaches and why it helps>", ' +
     `"questions": [{"ask": "<question>", "options": [<${options} short options>], "answer": <index of the right option>}]} ` +
@@ -767,6 +800,8 @@ export type BankItem = {
   url: string
   box: number
   due: string
+  /** Times answered wrong: what makes a weak spot. */
+  misses?: number
 }
 
 /** Days until the next review, by box: wrong (box 0) tomorrow, then 3, 7, 14, 30, 60 and 120 days. */
@@ -776,7 +811,7 @@ export const MASTERED_BOX = 4
 
 export function bankItem(question: Question, page: { path: string; title: string; url: string }, isRight: boolean, today: string): BankItem {
   return schedule(
-    { id: `${page.path}:${hash(question.ask)}`, ...question, ...page, box: 0, due: today },
+    { id: `${page.path}:${hash(question.ask)}`, ...question, ...page, box: 0, due: today, misses: 0 },
     isRight,
     today,
   )
@@ -785,7 +820,7 @@ export function bankItem(question: Question, page: { path: string; title: string
 /** The item after an answer today. */
 export function schedule(item: BankItem, isRight: boolean, today: string): BankItem {
   const box = isRight ? Math.min(item.box + 1, INTERVALS.length - 1) : 0
-  return { ...item, box, due: addDays(today, INTERVALS[box] ?? 1) }
+  return { ...item, box, due: addDays(today, INTERVALS[box] ?? 1), misses: (item.misses ?? 0) + (isRight ? 0 : 1) }
 }
 
 /** The questions due today, oldest first, at most `max`. */
@@ -813,4 +848,79 @@ export function bossFor(bank: readonly BankItem[], week: string): BankItem[] | u
   }
   for (const item of sorted) if (picked.length < 5 && !picked.includes(item)) picked.push(item)
   return picked
+}
+
+// ---- Weak spots ------------------------------------------------------------------
+
+export type WeakSpot = { path: string; title: string; url: string; misses: number }
+
+/** Pages you missed 2 questions or more on, the most missed first. */
+export function weakSpots(bank: readonly BankItem[]): WeakSpot[] {
+  const pages = new Map<string, WeakSpot>()
+  for (const item of bank) {
+    const spot = pages.get(item.path) ?? { path: item.path, title: item.title, url: item.url, misses: 0 }
+    pages.set(item.path, { ...spot, misses: spot.misses + (item.misses ?? 0) })
+  }
+  return [...pages.values()].filter(spot => spot.misses >= 2).sort((a, b) => b.misses - a.misses || a.title.localeCompare(b.title))
+}
+
+/** A page practised with at most one miss is fixed: its misses are forgiven. */
+export function forgive(bank: readonly BankItem[], path: string): BankItem[] {
+  return bank.map(item => (item.path === path ? { ...item, misses: 0 } : item))
+}
+
+// ---- Pro: two pages a day ----------------------------------------------------------
+
+/** A page you studied before to pair with today's, the same all day; none on the first day. */
+export function pickPartner(pages: readonly DocsPage[], done: readonly string[], day: string, today: string): DocsPage | undefined {
+  const pool = pages.filter(page => done.includes(page.path) && page.path !== today)
+  if (pool.length === 0) return undefined
+  return pool[Number.parseInt(hash(`${day}+`), 36) % pool.length]
+}
+
+// ---- The placement test ------------------------------------------------------------
+
+/** "Not sure" is always an option and never right: guessing would place you too high. */
+export const NOT_SURE = 'Not sure'
+
+/** Six questions, two per track, from the official docs. */
+export const PLACEMENT: readonly Question[] = [
+  {
+    ask: 'You want Claude to propose a plan and change nothing until you approve it. What do you use?',
+    options: ['Plan mode (Shift+Tab)', '/compact', 'claude -p'],
+    answer: 0,
+  },
+  {
+    ask: 'Where do you write the rules Claude reads at the start of every session?',
+    options: ['CLAUDE.md', '.gitignore', 'package.json'],
+    answer: 0,
+  },
+  {
+    ask: "Where does a project's own subagent live?",
+    options: ['.claude/agents/', '.claude/hooks/', '.git/agents/'],
+    answer: 0,
+  },
+  {
+    ask: 'Which file shares project-scoped MCP servers with your team?',
+    options: ['.mcp.json', 'CLAUDE.md', '.claude/settings.local.json'],
+    answer: 0,
+  },
+  {
+    ask: 'Which hook event can block a tool call before it runs?',
+    options: ['PreToolUse', 'PostToolUse', 'SessionEnd'],
+    answer: 0,
+  },
+  {
+    ask: 'Two sessions must edit the same repository at once without colliding. What do you use?',
+    options: ['claude --worktree <name>', 'claude --continue', '/branch'],
+    answer: 0,
+  },
+].map(q => {
+  const mixed = shuffled(q)
+  return { ...mixed, options: [...mixed.options, NOT_SURE] }
+})
+
+/** The track for a placement score out of 6. */
+export function placementTrack(right: number): Track {
+  return right >= 5 ? 'pro' : right >= 3 ? 'advanced' : 'beginner'
 }

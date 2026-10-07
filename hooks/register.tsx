@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { QuestBankItem, QuestDaily, QuestPractice, QuestProgress } from '../types'
-import { cardHtml } from './card'
+import { cardHtml, weekCardHtml } from './card'
 import {
   badgesOf,
   bankItem,
@@ -11,6 +11,7 @@ import {
   dayOf,
   docsPages,
   dueToday,
+  forgive,
   isAtLeast,
   isTrack,
   levelOf,
@@ -19,10 +20,14 @@ import {
   nextQuest,
   parseQuiz,
   pickDaily,
+  pickPartner,
+  placementTrack,
   quizSystem,
   rankOf,
   schedule,
   streakOn,
+  weakSpots,
+  weekLog,
   weekOf,
   withStreak,
   xpOf,
@@ -31,9 +36,11 @@ import {
   CHANGELOG_URL,
   DAILY_XP,
   DOCS_INDEX_URL,
+  DRILL_XP,
   INTERVALS,
   LEVEL_NAMES,
   NEW_XP,
+  PLACEMENT,
   QUESTS,
   QUEST_XP,
   REVIEW_XP,
@@ -68,6 +75,7 @@ const EMPTY_PROGRESS: QuestProgress = {
   bosses: 0,
   reviews: 0,
   bonus: 0,
+  fixed: 0,
 }
 const EMPTY_DAILY: QuestDaily = {
   day: '',
@@ -108,6 +116,7 @@ const news = atom({ plugin: 'quests', key: 'news' } as const, {
   error: '',
 })
 const daily = atom({ plugin: 'quests', key: 'daily' } as const, EMPTY_DAILY)
+const drill = atom({ plugin: 'quests', key: 'drill' } as const, EMPTY_DAILY)
 const bank = atom({ plugin: 'quests', key: 'bank' } as const, NO_ITEMS)
 const practice = atom({ plugin: 'quests', key: 'practice' } as const, EMPTY_PRACTICE)
 const view = atom({ plugin: 'quests', key: 'view' } as const, {
@@ -117,6 +126,9 @@ const view = atom({ plugin: 'quests', key: 'view' } as const, {
   step: 0,
   note: '',
   skipped: [],
+  test: -1,
+  testRight: 0,
+  testNote: '',
 })
 
 async function today($: Engine): Promise<string> {
@@ -144,16 +156,29 @@ async function loadProgress($: Engine): Promise<void> {
     bosses: num(saved?.bosses),
     reviews: num(saved?.reviews),
     bonus: num(saved?.bonus),
+    fixed: num(saved?.fixed),
+    ...(saved?.week !== undefined && typeof saved.week.id === 'string'
+      ? { week: { id: saved.week.id, xpStart: num(saved.week.xpStart), topics: list(saved.week.topics), reviews: num(saved.week.reviews), fixed: num(saved.week.fixed) } }
+      : {}),
   }))
   const items = (await $.store.get('bank')) as QuestBankItem[] | undefined
   await update($, bank, () => (Array.isArray(items) ? items : NO_ITEMS))
   const saw = (await $.store.get('practice')) as QuestPractice | undefined
   if (saw !== undefined && typeof saw === 'object') await update($, practice, () => ({ ...EMPTY_PRACTICE, ...saw }))
+  const drilled = (await $.store.get('drill')) as QuestDaily | undefined
+  if (drilled !== undefined && drilled.day === (await today($))) await update($, drill, () => ({ ...EMPTY_DAILY, ...drilled, status: drilled.status === 'loading' ? ('idle' as const) : drilled.status }))
 }
 
 async function saveProgress($: Engine, next: QuestProgress): Promise<void> {
   await update($, progress, () => next)
-  await $.store.set('progress', { ...next, done: [...next.done], tried: [...next.tried], quizzes: [...next.quizzes], daily: [...next.daily] })
+  await $.store.set('progress', {
+    ...next,
+    done: [...next.done],
+    tried: [...next.tried],
+    quizzes: [...next.quizzes],
+    daily: [...next.daily],
+    ...(next.week !== undefined ? { week: { ...next.week, topics: [...next.week.topics] } } : {}),
+  })
 }
 
 async function saveBank($: Engine, items: readonly QuestBankItem[]): Promise<void> {
@@ -171,12 +196,28 @@ async function setPractice($: Engine, change: (p: QuestPractice) => QuestPractic
 }
 
 // Adds XP (a day with XP keeps the streak going), then says so, and says a
-// new level, rank, badge or streak day out loud too.
-async function award($: Engine, change: (current: QuestProgress) => QuestProgress, message: string): Promise<void> {
+// new level, rank, badge or streak day out loud too. `log` goes in this
+// week's log, for the week card.
+type Log = { topic?: string; isReview?: boolean; isFix?: boolean }
+
+async function award($: Engine, change: (current: QuestProgress) => QuestProgress, message: string, log: Log = {}): Promise<void> {
   const before = await read($, progress)
   const changed = change(before)
   if (changed === before) return
-  const after = withStreak(changed, await today($))
+  const day = await today($)
+  const week = weekLog(before, day)
+  const after = withStreak(
+    {
+      ...changed,
+      week: {
+        ...week,
+        topics: log.topic === undefined || week.topics.includes(log.topic) ? week.topics : [...week.topics, log.topic],
+        reviews: week.reviews + (log.isReview === true ? 1 : 0),
+        fixed: week.fixed + (log.isFix === true ? 1 : 0),
+      },
+    },
+    day,
+  )
   await saveProgress($, after)
   const levelBefore = levelOf(xpOf(before)).level
   const levelAfter = levelOf(xpOf(after)).level
@@ -235,7 +276,7 @@ async function lookAround($: Engine): Promise<void> {
 async function chooseTrack($: Engine, track: Track): Promise<void> {
   const current = await read($, progress)
   await saveProgress($, { ...current, track })
-  await update($, view, value => ({ ...value, focus: '', step: 0, note: '', skipped: [] }))
+  await update($, view, value => ({ ...value, focus: '', step: 0, note: '', skipped: [], testNote: '' }))
   // Today's page follows the new track, unless today's quiz has started.
   const todays = await read($, daily)
   if (todays.status === 'idle' || todays.status === 'error') {
@@ -289,9 +330,20 @@ async function prepareDaily($: Engine): Promise<void> {
     }
     const current = await read($, progress)
     const track = trackOf(current)
-    const page = pickDaily(await loadPages($), current.daily, day, track)
+    const pages = await loadPages($)
+    const page = pickDaily(pages, current.daily, day, track)
     if (page === undefined) return
-    const fresh: QuestDaily = { ...EMPTY_DAILY, day, path: page.path, title: page.title, url: page.url, track }
+    // Pro: a page you studied before joins today's, for questions on how they combine.
+    const partner = track === 'pro' ? pickPartner(pages, current.daily, day, page.path) : undefined
+    const fresh: QuestDaily = {
+      ...EMPTY_DAILY,
+      day,
+      path: page.path,
+      title: page.title,
+      url: page.url,
+      track,
+      ...(partner !== undefined ? { also: { path: partner.path, title: partner.title, url: partner.url } } : {}),
+    }
     await update($, daily, () => fresh)
     await $.store.set('daily', fresh)
   } catch {
@@ -299,60 +351,120 @@ async function prepareDaily($: Engine): Promise<void> {
   }
 }
 
-// Reads today's page and asks Claude (Haiku, on your account) for a quiz on it.
-async function startDaily($: Engine): Promise<void> {
-  const current = await read($, daily)
+type Quiz = 'daily' | 'drill'
+const readQuiz = ($: Engine, which: Quiz) => (which === 'daily' ? read($, daily) : read($, drill))
+const setQuiz = ($: Engine, which: Quiz, change: (value: QuestDaily) => QuestDaily) =>
+  which === 'daily' ? update($, daily, change) : update($, drill, change)
+
+// Reads the page (and Pro's second page) and asks Claude (Haiku, on your
+// account) for a quiz on it: today's, or new questions on a weak spot.
+async function startQuiz($: Engine, which: Quiz): Promise<void> {
+  const current = await readQuiz($, which)
   if (current.path === '' || current.status === 'loading') return
-  await update($, daily, value => ({ ...value, status: 'loading' as const, error: '' }))
+  await setQuiz($, which, value => ({ ...value, status: 'loading' as const, error: '' }))
   try {
-    const page = await $.http.fetch(`${current.url}.md`)
-    if (!page.ok) throw new Error(`the docs page answered ${page.status}`)
+    const pages = [{ title: current.title, url: current.url }, ...(current.also !== undefined ? [current.also] : [])]
+    const texts: string[] = []
+    for (const page of pages) {
+      const answer = await $.http.fetch(`${page.url}.md`)
+      if (!answer.ok) throw new Error(`the docs page answered ${answer.status}`)
+      texts.push(`Page: ${page.title}\n\n${answer.text.slice(0, PAGE_MAX_CHARS / pages.length)}`)
+    }
+    // A weak spot: new questions, not the ones you already have.
+    const known = which === 'drill' ? (await read($, bank)).filter(item => item.path === current.path).map(item => `- ${item.ask}`) : []
     const reply = await $.model.complete({
       model: 'haiku',
       maxTokens: 900,
-      system: quizSystem(current.track),
-      prompt: `Page: ${current.title}\n\n${page.text.slice(0, PAGE_MAX_CHARS)}`,
+      system: quizSystem(current.track, which === 'drill' ? 'weak' : pages.length > 1 ? 'two' : 'one'),
+      prompt: texts.join('\n\n---\n\n') + (known.length > 0 ? `\n\nQuestions already asked (do not repeat):\n${known.join('\n')}` : ''),
     })
     if (!reply.isAnswered) throw new Error(`Claude could not write the quiz (${reply.reason})`)
     const quiz = parseQuiz(reply.text)
     if (quiz === undefined) throw new Error('the quiz came back in a shape I cannot read')
     const ready: QuestDaily = { ...current, status: 'ready', summary: quiz.summary, questions: quiz.questions, step: 0, misses: [], note: '' }
-    await update($, daily, () => ready)
-    await $.store.set('daily', ready)
+    await setQuiz($, which, () => ready)
+    await $.store.set(which, ready)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await update($, daily, value => ({ ...value, status: 'error' as const, error: message }))
+    await setQuiz($, which, value => ({ ...value, status: 'error' as const, error: message }))
   }
 }
 
-async function answerDaily($: Engine, option: number): Promise<void> {
-  const current = await read($, daily)
+async function answerQuiz($: Engine, which: Quiz, option: number): Promise<void> {
+  const current = await readQuiz($, which)
   const question = current.questions[current.step]
   if (current.status !== 'ready' || question === undefined) return
   if (option !== question.answer) {
     const misses = current.misses.includes(current.step) ? current.misses : [...current.misses, current.step]
-    await update($, daily, value => ({ ...value, misses, note: 'Not quite. The page has it: open it and try again.' }))
+    await setQuiz($, which, value => ({ ...value, misses, note: 'Not quite. The page has it: open it and try again.' }))
     return
   }
   if (current.step + 1 < current.questions.length) {
-    await update($, daily, value => ({ ...value, step: value.step + 1, note: 'Right!' }))
+    await setQuiz($, which, value => ({ ...value, step: value.step + 1, note: 'Right!' }))
     return
   }
   const done: QuestDaily = { ...current, status: 'done', note: '' }
-  await update($, daily, () => done)
-  await $.store.set('daily', done)
+  await setQuiz($, which, () => done)
+  await $.store.set(which, done)
   // Every question goes to your memory bank: a miss comes back tomorrow.
   const day = await today($)
   const items = await read($, bank)
   const page = { path: current.path, title: current.title, url: current.url }
   const added = current.questions.map((q, i) => bankItem(q, page, !current.misses.includes(i), day))
-  await saveBank($, [...items.filter(item => !added.some(a => a.id === item.id)), ...added])
-  const xp = TRACKS[current.track].dailyXp
+  const kept = [...items.filter(item => !added.some(a => a.id === item.id)), ...added]
+  if (which === 'daily') {
+    await saveBank($, kept)
+    const xp = TRACKS[current.track].dailyXp
+    await award(
+      $,
+      p => (p.daily.includes(current.path) ? p : { ...p, daily: [...p.daily, current.path], bonus: (p.bonus ?? 0) + xp - DAILY_XP }),
+      `📅 Daily quest done: ${current.title} (+${xp} XP) · ${added.length} questions saved for review`,
+      { topic: current.title },
+    )
+    return
+  }
+  // A weak spot practised with at most one miss is fixed.
+  const isFixed = current.misses.length <= 1
+  await saveBank($, isFixed ? forgive(kept, current.path) : kept)
   await award(
     $,
-    p => (p.daily.includes(current.path) ? p : { ...p, daily: [...p.daily, current.path], bonus: (p.bonus ?? 0) + xp - DAILY_XP }),
-    `📅 Daily quest done: ${current.title} (+${xp} XP) · ${added.length} questions saved for review`,
+    p => ({ ...p, bonus: (p.bonus ?? 0) + DRILL_XP, fixed: (p.fixed ?? 0) + (isFixed ? 1 : 0) }),
+    `🎯 ${isFixed ? `Weak spot fixed: ${current.title}` : `Practised: ${current.title}. It stays on your list for now`} (+${DRILL_XP} XP)`,
+    { topic: current.title, isFix: isFixed },
   )
+}
+
+// Picks your weakest page for today's practice; Claude writes it on Start.
+async function startDrill($: Engine): Promise<void> {
+  const day = await today($)
+  const current = await read($, drill)
+  if (current.day === day && current.status !== 'idle' && current.status !== 'error') return
+  const spot = weakSpots(await read($, bank))[0]
+  if (spot === undefined) return
+  const fresh: QuestDaily = { ...EMPTY_DAILY, day, path: spot.path, title: spot.title, url: spot.url, track: trackOf(await read($, progress)) }
+  await update($, drill, () => fresh)
+  await startQuiz($, 'drill')
+}
+
+// ---- The placement test ---------------------------------------------------------
+
+async function answerTest($: Engine, option: number): Promise<void> {
+  const shown = await read($, view)
+  const question = PLACEMENT[shown.test]
+  if (question === undefined) return
+  const right = shown.testRight + (option === question.answer ? 1 : 0)
+  if (shown.test + 1 < PLACEMENT.length) {
+    await update($, view, v => ({ ...v, test: v.test + 1, testRight: right }))
+    return
+  }
+  const track = placementTrack(right)
+  await chooseTrack($, track)
+  await update($, view, v => ({
+    ...v,
+    test: -1,
+    testRight: 0,
+    testNote: `You got ${right}/${PLACEMENT.length}: ${TRACKS[track].name} suits you. Change it any time under Me.`,
+  }))
 }
 
 // ---- Review and the weekly boss -------------------------------------------------
@@ -384,7 +496,7 @@ async function answerReview($: Engine, option: number): Promise<void> {
     reviewed: p.reviewed + 1,
     note: isRight ? `Right! Back in ${INTERVALS[next.box]} days.` : `The answer: ${item.options[item.answer]}. It comes back tomorrow.`,
   }))
-  if (isRight) await award($, p => ({ ...p, reviews: p.reviews + 1 }), `🔁 Remembered (+${REVIEW_XP} XP)`)
+  if (isRight) await award($, p => ({ ...p, reviews: p.reviews + 1 }), `🔁 Remembered (+${REVIEW_XP} XP)`, { isReview: true })
 }
 
 async function startBoss($: Engine): Promise<void> {
@@ -497,12 +609,26 @@ async function tried($: Engine, key: string): Promise<void> {
 
 // ---- The card -----------------------------------------------------------------
 
-// Writes the card page and opens it in the browser.
-async function shareCard($: Engine): Promise<string> {
+// Writes a card page and opens it in the browser: your level, or your week.
+async function shareCard($: Engine, kind: 'level' | 'week' = 'level'): Promise<string> {
   const current = await read($, progress)
   const day = await today($)
   const xp = xpOf(current)
-  const html = cardHtml({
+  const week = weekLog(current, day)
+  const practised = await read($, practice)
+  const html = kind === 'week' ? weekCardHtml({
+    week: week.id,
+    gained: xp - week.xpStart,
+    level: levelOf(xp).level,
+    rank: rankOf(levelOf(xp).level),
+    topics: week.topics,
+    reviews: week.reviews,
+    fixed: week.fixed,
+    isBossBeaten: practised.week === week.id && practised.boss === 'won',
+    streak: streakOn(current, day),
+    mastered: masteredIn(await read($, bank)),
+    date: day,
+  }) : cardHtml({
     xp,
     rank: rankOf(levelOf(xp).level),
     done: current.done.length,
@@ -517,7 +643,7 @@ async function shareCard($: Engine): Promise<string> {
   const home = (await $.env.get('HOME')) ?? ''
   const isWindows = (await $.env.get('OS')) === 'Windows_NT'
   const tmp = (await $.env.get('TMPDIR')) ?? (await $.env.get('TEMP')) ?? '/tmp'
-  const path = `${tmp.replace(/[\\/]$/, '')}/claude-quests-card.html`
+  const path = `${tmp.replace(/[\\/]$/, '')}/claude-quests-${kind === 'week' ? 'week' : 'card'}.html`
   await $.fs.write(path, html)
   const argv = isWindows ? ['cmd', '/c', 'start', '', path] : home.startsWith('/Users/') ? ['open', path] : ['xdg-open', path]
   void drain($.process.spawn({ argv }))
@@ -549,7 +675,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'quests',
       description: 'Learn Claude Code by doing: quests, daily docs quizzes, reviews, a weekly boss, badges and ranks',
-      argumentHint: '[card | new]',
+      argumentHint: '[card | week | new]',
     })
     await loadProgress($)
     await loadNews($)
@@ -564,6 +690,10 @@ export const register: Register = on => {
     if (args === 'card') {
       const path = await shareCard($)
       return { text: `Your progress card is open in the browser (${path}). Press Download PNG to save it.` }
+    }
+    if (args === 'week') {
+      const path = await shareCard($, 'week')
+      return { text: `Your week card is open in the browser (${path}). Press Download PNG to save it.` }
     }
     await openPane($)
     if (args === 'new') await update($, view, value => ({ ...value, tab: 'new' as const }))
@@ -624,7 +754,10 @@ export const register: Register = on => {
     const todays = await read($, daily)
     const items = await read($, bank)
     const practised = await read($, practice)
+    const drilled = await read($, drill)
     const day = dayOf(await $.clock.now())
+    const spots = weakSpots(items)
+    const week = weekLog(current, day)
     const xp = xpOf(current)
     const { level, into, size } = levelOf(xp)
     const rank = rankOf(level)
@@ -637,9 +770,8 @@ export const register: Register = on => {
     const reviewedToday = practised.day === day ? practised.reviewed : 0
     const due = dueToday(items, day, Math.max(0, REVIEWS_A_DAY - reviewedToday))
     const allDue = dueToday(items, day, Number.MAX_SAFE_INTEGER).length
-    const week = weekOf(day)
-    const bossQuestions = bossFor(items, week)
-    const bossState = practised.week === week ? practised : { ...practised, boss: 'idle' as const, bossTriedOn: '' }
+    const bossQuestions = bossFor(items, week.id)
+    const bossState = practised.week === week.id ? practised : { ...practised, boss: 'idle' as const, bossTriedOn: '' }
 
     const options = (key: string, question: Question, onPick: (option: number) => void) => (
       <Box flexDirection="column">
@@ -658,6 +790,7 @@ export const register: Register = on => {
         <Button key="tab-new" label={`${shown.tab === 'new' ? '▸ ' : ''}New${newCount > 0 ? ` (${newCount})` : ''}`} onPress={() => void update($, view, v => ({ ...v, tab: 'new' as const }))} />
         <Button key="tab-me" label={shown.tab === 'me' ? '▸ Me' : 'Me'} onPress={() => void update($, view, v => ({ ...v, tab: 'me' as const }))} />
         <Button key="card" label="Share card" onPress={() => void shareCard($)} />
+        <Button key="week-card" label="Week card" onPress={() => void shareCard($, 'week')} />
       </Box>
     )
 
@@ -673,6 +806,9 @@ export const register: Register = on => {
       </Box>
     )
 
+    const testQuestion = PLACEMENT[shown.test]
+    const startTest = () => update($, view, v => ({ ...v, tab: 'quests' as const, test: 0, testRight: 0, testNote: '' }))
+
     let body
     if (shown.tab === 'quests') {
       const quest = shownQuest(shown.focus, shown.skipped, current)
@@ -683,41 +819,52 @@ export const register: Register = on => {
       const bossItem = items.find(i => i.id === bossState.bossIds[bossState.bossStep])
       body = (
         <Box flexDirection="column" gap={1}>
-          {current.track === '' && (
+          {(current.track === '' || testQuestion !== undefined) && (
             <Box key="choose" flexDirection="column" borderStyle="round" paddingX={1}>
-              <Text bold color="warning">Choose your track</Text>
-              {(Object.keys(TRACKS) as Track[]).map(track => (
-                <Text key={`about-${track}`}>{`${TRACKS[track].name}: ${TRACKS[track].about}`}</Text>
-              ))}
-              {trackButtons}
-              <Text dimColor>Your track sets where you start and how hard the daily questions are. Change it any time under Me.</Text>
+              <Text bold color="warning">{testQuestion !== undefined ? 'Placement test' : 'Choose your track'}</Text>
+              {testQuestion !== undefined ? (
+                options(`t-${shown.test}`, { ...testQuestion, ask: `${shown.test + 1}/${PLACEMENT.length} · ${testQuestion.ask}` }, o => void answerTest($, o))
+              ) : (
+                <Box flexDirection="column">
+                  {(Object.keys(TRACKS) as Track[]).map(track => (
+                    <Text key={`about-${track}`}>{`${TRACKS[track].name}: ${TRACKS[track].about}`}</Text>
+                  ))}
+                  {trackButtons}
+                  <Button key="test-start" label={`Not sure? Take the ${PLACEMENT.length}-question test`} onPress={() => void startTest()} />
+                  <Text dimColor>Your track sets where you start and how hard the daily questions are. Change it any time under Me.</Text>
+                </Box>
+              )}
+              {testQuestion !== undefined && <Text dimColor>Pick "Not sure" rather than guess: the test is only to place you.</Text>}
             </Box>
           )}
+          {shown.testNote !== '' && <Text key="test-note" color="success">{shown.testNote}</Text>}
 
           {todays.path !== '' && (
             <Box key="daily" flexDirection="column" borderStyle="round" paddingX={1}>
               <Text bold color="warning">
-                {`📅 Daily · ${todays.title}${isDailyDone ? ' · ✓ done' : ` · ${TRACKS[todays.track].name} · +${TRACKS[todays.track].dailyXp} XP`}`}
+                {`📅 Daily · ${todays.title}${todays.also !== undefined ? ` + ${todays.also.title}` : ''}${isDailyDone ? ' · ✓ done' : ` · ${TRACKS[todays.track].name} · +${TRACKS[todays.track].dailyXp} XP`}`}
               </Text>
               {todays.summary !== '' && <Text>{todays.summary}</Text>}
-              <Link href={todays.url} label="Read the page (official docs)" />
+              <Link href={todays.url} label={todays.also !== undefined ? `Read ${todays.title} (official docs)` : 'Read the page (official docs)'} />
+              {todays.also !== undefined && <Link href={todays.also.url} label={`Read ${todays.also.title} (official docs)`} />}
+              {todays.also !== undefined && todays.status === 'idle' && !isDailyDone && <Text dimColor>Pro: one page you studied before joins today's. Some questions need both.</Text>}
               {!isDailyDone && todays.status === 'idle' && (
                 <Button
                   key="daily-start"
                   label={`Start today's quiz (${TRACKS[todays.track].questions} questions)`}
-                  onPress={() => void startDaily($)}
+                  onPress={() => void startQuiz($, 'daily')}
                 />
               )}
               {todays.status === 'loading' && <Text dimColor>Claude is reading the page and writing your quiz…</Text>}
               {todays.status === 'error' && (
                 <Box flexDirection="column">
                   <Text color="warning">{`Could not make the quiz: ${todays.error}`}</Text>
-                  <Button key="daily-retry" label="Try again" onPress={() => void startDaily($)} />
+                  <Button key="daily-retry" label="Try again" onPress={() => void startQuiz($, 'daily')} />
                 </Box>
               )}
               {todays.status === 'ready' &&
                 dailyQuestion !== undefined &&
-                options(`d-${todays.step}`, { ...dailyQuestion, ask: `${todays.step + 1}/${todays.questions.length} · ${dailyQuestion.ask}` }, o => void answerDaily($, o))}
+                options(`d-${todays.step}`, { ...dailyQuestion, ask: `${todays.step + 1}/${todays.questions.length} · ${dailyQuestion.ask}` }, o => void answerQuiz($, 'daily', o))}
               {todays.note !== '' && <Text color="warning">{todays.note}</Text>}
               {isDailyDone && <Text dimColor>Saved to your memory bank. A new page tomorrow.</Text>}
             </Box>
@@ -736,6 +883,39 @@ export const register: Register = on => {
             <Box key="review-start" flexDirection="column" borderStyle="round" paddingX={1}>
               <Text bold color="warning">{`🔁 Review · ${due.length} due today`}</Text>
               <Button key="review-go" label="Start review" onPress={() => void practiceToday($)} />
+            </Box>
+          )}
+
+          {(drilled.day === day ? drilled.path !== '' : spots[0] !== undefined) && (
+            <Box key="weak" flexDirection="column" borderStyle="round" paddingX={1}>
+              {drilled.day === day && drilled.path !== '' ? (
+                <Box flexDirection="column">
+                  <Text bold color="warning">{`🎯 Weak spot · ${drilled.title}${drilled.status === 'done' ? ' · ✓ practised today' : ` · +${DRILL_XP} XP`}`}</Text>
+                  <Link href={drilled.url} label="Read the page (official docs)" />
+                  {drilled.status === 'loading' && <Text dimColor>Claude is writing new questions on it…</Text>}
+                  {drilled.status === 'error' && (
+                    <Box flexDirection="column">
+                      <Text color="warning">{`Could not make the questions: ${drilled.error}`}</Text>
+                      <Button key="drill-retry" label="Try again" onPress={() => void startQuiz($, 'drill')} />
+                    </Box>
+                  )}
+                  {drilled.status === 'ready' &&
+                    drilled.questions[drilled.step] !== undefined &&
+                    options(
+                      `w-${drilled.step}`,
+                      { ...(drilled.questions[drilled.step] as Question), ask: `${drilled.step + 1}/${drilled.questions.length} · ${drilled.questions[drilled.step]?.ask ?? ''}` },
+                      o => void answerQuiz($, 'drill', o),
+                    )}
+                  {drilled.note !== '' && <Text color="warning">{drilled.note}</Text>}
+                  {drilled.status === 'done' && <Text dimColor>{spots.some(spot => spot.path === drilled.path) ? 'Still shaky: it comes back. One practice a day.' : 'Fixed. One practice a day.'}</Text>}
+                </Box>
+              ) : (
+                <Box flexDirection="column">
+                  <Text bold color="warning">{`🎯 Weak spot · ${spots[0]?.title ?? ''} · missed ${spots[0]?.misses ?? 0} times`}</Text>
+                  <Text>New questions on the page you miss most. At most one miss and it counts as fixed.</Text>
+                  <Button key="drill-start" label={`Practise it (+${DRILL_XP} XP)`} onPress={() => void startDrill($)} />
+                </Box>
+              )}
             </Box>
           )}
 
@@ -849,6 +1029,20 @@ export const register: Register = on => {
           <Box flexDirection="column">
             <Text bold>{`Track: ${isTrack(current.track) ? TRACKS[current.track].name : 'not chosen'}`}</Text>
             {trackButtons}
+            <Button key="test-retake" label="Take the placement test" onPress={() => void startTest()} />
+          </Box>
+          <Box flexDirection="column">
+            <Text bold>This week</Text>
+            <Text>{`+${xp - week.xpStart} XP · ${week.topics.length} pages studied · ${week.reviews} reviews right${week.fixed > 0 ? ` · ${week.fixed} weak spots fixed` : ''}`}</Text>
+            {week.topics.length > 0 && <Text dimColor>{week.topics.join(' · ')}</Text>}
+          </Box>
+          <Box flexDirection="column">
+            <Text bold>{`Weak spots · ${spots.length}`}</Text>
+            {spots.length === 0 && <Text dimColor>None: a page joins this list after 2 missed questions.</Text>}
+            {spots.slice(0, 5).map(spot => (
+              <Text key={`ws-${spot.path}`}>{`${spot.title} · missed ${spot.misses} times`}</Text>
+            ))}
+            <Text dimColor>{`${current.fixed ?? 0} fixed so far.`}</Text>
           </Box>
           <Box flexDirection="column">
             <Text bold>Your memory</Text>

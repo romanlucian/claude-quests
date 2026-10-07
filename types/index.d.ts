@@ -17,8 +17,12 @@ export type QuestProgress = {
   mastered: number
   bosses: number
   reviews: number
-  /** XP beyond the counted things: the harder tracks' daily extra. */
+  /** XP beyond the counted things: the harder tracks' daily extra, weak-spot practice. */
   bonus?: number
+  /** Weak spots fixed. */
+  fixed?: number
+  /** This week so far, for the week card. */
+  week?: { id: string; xpStart: number; topics: readonly string[]; reviews: number; fixed: number }
 }
 
 /** A question in your memory bank, asked again on a schedule. */
@@ -32,6 +36,8 @@ export type QuestBankItem = {
   url: string
   box: number
   due: string
+  /** Times answered wrong. */
+  misses?: number
 }
 
 /** Today's reviews and the weekly boss. */
@@ -48,7 +54,7 @@ export type QuestPractice = {
   bossNote: string
 }
 
-/** Today's docs quest. */
+/** Today's docs quest, or a weak spot's practice. */
 export type QuestDaily = {
   day: string
   status: 'idle' | 'loading' | 'ready' | 'error' | 'done'
@@ -57,6 +63,8 @@ export type QuestDaily = {
   url: string
   /** The track the quiz was written for. */
   track: 'beginner' | 'advanced' | 'pro'
+  /** Pro: a page studied before, quizzed together with today's. */
+  also?: { path: string; title: string; url: string }
   summary: string
   questions: readonly { ask: string; options: readonly string[]; answer: number }[]
   step: number
@@ -90,6 +98,10 @@ export type QuestView = {
   note: string
   /** Quests passed over with "Another one". */
   skipped: readonly string[]
+  /** The placement test: the question shown (-1: not running), answers right, and the result. */
+  test: number
+  testRight: number
+  testNote: string
 }
 
 declare module 'claude-code' {
@@ -98,6 +110,7 @@ declare module 'claude-code' {
       progress: QuestProgress
       news: QuestNews
       daily: QuestDaily
+      drill: QuestDaily
       bank: readonly QuestBankItem[]
       practice: QuestPractice
       view: QuestView
