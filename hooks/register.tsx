@@ -1188,7 +1188,7 @@ export const register: Register = on => {
       <Box flexDirection="column" gap={1}>
         {isCatDrawn ? (
           <Box gap={2} alignItems="center">
-            {catKind === 'picture' && Image !== undefined && <Image key="cat" source={catSource($, catFrame)} columns={9} rows={CAT_ROWS} alt="🐱" />}
+            {catKind === 'picture' && Image !== undefined && <Image key="cat" source={catSource($, catFrame)} columns={6} rows={CAT_ROWS} alt="🐱" />}
             {catKind === 'pixels' && Raster !== undefined && (
               <Raster key="cat" columns={CAT_COLUMNS} rows={CAT_ROWS} cells={CAT_CELLS[catFrame] ?? CAT_CELLS.idle ?? ''} />
             )}

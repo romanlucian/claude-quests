@@ -1,4 +1,4 @@
-// The cat as a hand-drawn 12x12 sprite: letters are colours, "." is clear.
+// The cat as a hand-drawn 9x8 sprite: letters are colours, "." is clear.
 // The drawing is Lucian Roman's, all rights reserved.
 export const COLORS = {
   K: [16, 12, 10],      // outline
@@ -13,21 +13,17 @@ export const COLORS = {
   N: [44, 52, 74],      // trousers
   W: [236, 232, 222],   // shoes
   T: [232, 70, 50],     // tail
-  S: [255, 214, 90],    // sparkle
+  S: [255, 255, 255],   // sparkle
 }
 const BASE = [
-  '..K......K..',
-  '.KOK....KOK.',
-  '.KYYKKKKYYK.',
-  '.KYYOOYYYYK.',
-  '.KYBKOYKBYK.',
-  '.KCYYPPYYCK.',
-  'C.KCCCCCCK..',
-  'TK.KRDDRK...',
-  'T.YRRRRRRY..',
-  'TTKKRRRRKK..',
-  '.TTKNNKNNK..',
-  '...KWWKWWK..',
+  '.Y.....Y.',
+  '.YY...YY.',
+  '.YYOOYYY.',
+  '.YBKYKBY.',
+  'CYCCPCCY.',
+  'T.YRRRY..',
+  'TT.NNN...',
+  '..WW.WW..',
 ]
 const edit = (rows, changes) => rows.map((row, y) => {
   const c = changes[y]; if (!c) return row
@@ -36,9 +32,9 @@ const edit = (rows, changes) => rows.map((row, y) => {
 // Frames: idle, tail wag, talking (mouth half and wide open), cheering (arms up, sparkles).
 export const FRAMES = {
   idle: BASE,
-  breathe: edit(BASE, { 6: '.C', 7: 'CK', 8: 'TT', 9: '.T' }),
-  talk1: edit(BASE, { 6: '     MM' }),
-  talk2: edit(BASE, { 5: '      ', 6: '    KMMK' }),
-  cheer: edit(BASE, { 0: 'S         S', 1: '           ', 6: '    KMMK', 7: '  R      R ', 8: '  KRRRRRRK ' }),
-  cheer2: edit(BASE, { 0: '.S        S.', 6: '     MM', 7: ' R        R' }),
+  breathe: edit(BASE, { 4: '.', 5: 'C', 7: 'T' }),
+  talk1: edit(BASE, { 4: '    M' }),
+  talk2: edit(BASE, { 4: '   MMM' }),
+  cheer: edit(BASE, { 0: 'S       S', 4: '   MMM', 5: '  R   R' }),
+  cheer2: edit(BASE, { 1: 'S       S', 4: '    M' }),
 }

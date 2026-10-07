@@ -24,7 +24,7 @@ with what's waiting (today's page, reviews due, your next quest), cheers when
 you earn XP and tells you when an answer was wrong. He moves: he breathes,
 his mouth moves while he talks, and he jumps with stars when you level up.
 He is small (as tall as the text beside him) and full body: in VS Code (and
-any terminal without pictures) a hand-drawn 12×12 pixel sprite in the
+any terminal without pictures) a hand-drawn 9×8 pixel sprite (4 rows) in the
 terminal's own characters; in Ghostty and kitty the full drawing.
 Don't want him? *Me → Cat: on (hide him)*.
 
